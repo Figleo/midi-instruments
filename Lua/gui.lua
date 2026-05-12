@@ -36,8 +36,8 @@ end
 
 -- UI widgets
 
-local frame = nil       -- Full-screen invisible layer so the panel can sit on top.
-local panelFrame = nil  -- The visible box you drag around.
+local frame = nil      -- Full-screen invisible layer so the panel can sit on top.
+local panelFrame = nil -- The visible box you drag around.
 local titleText = nil
 local fileLabel = nil
 local statusLabel = nil
@@ -89,16 +89,23 @@ local function createPanel()
         end)
     end
 
-    -- Drag by the title strip. Text sits inside the handle so dragging still works on the label.
+    -- Drag by the title strip. The GUIDragIndicator icon is pinned to the left;
+    -- dragging still works across the entire header width.
     local titleDrag = GUI.DragHandle(
         GUI.RectTransform(Vector2(1, 0.14), panelFrame.RectTransform, GUI.Anchor.TopCenter),
         panelFrame.RectTransform,
-        "GUIDragIndicator"
+        nil
     )
     titleDrag.CanBeFocused = true
     pcall(function()
         titleDrag.DragArea = Rectangle(0, 0, GameMain.GraphicsWidth, GameMain.GraphicsHeight)
     end)
+
+    local dragIndicator = GUI.Frame(
+        GUI.RectTransform(Vector2(0.10, 0.75), titleDrag.RectTransform, GUI.Anchor.CenterLeft),
+        "GUIDragIndicator"
+    )
+    dragIndicator.CanBeFocused = false
 
     titleText = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 1), titleDrag.RectTransform),
@@ -263,7 +270,6 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
             end
         end)
     end
-
 end)
 
 MidiMod.Log("[MidiMod] GUI Initialized. Panel auto-shows on instrument pickup. Toggle: F5")
