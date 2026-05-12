@@ -1,40 +1,41 @@
 -- Plays note samples in 3D, caps polyphony, and dulls sound through walls or closed doors.
 
-MidiMod = MidiMod or {}
-MidiMod.SoundEngine = {}
+MidiMod                       = MidiMod or {}
+MidiMod.SoundEngine           = {}
 
-local SoundEngine = MidiMod.SoundEngine
+local SoundEngine             = MidiMod.SoundEngine
 
-local NOTE_NAMES = {
+local NOTE_NAMES              = {
     "C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"
 }
 
-local SAMPLE_MIN        = 24
-local SAMPLE_MAX        = 107
-local MAX_POLYPHONY     = 16
-local MAX_PER_SAMPLE    = 4
-local POOL_SIZE         = 2
-local MAX_NEW_PER_FRAME = 12
-local LOAD_PER_FRAME    = 8 
-local SOUND_RANGE       = 1000.0
-local SOUND_NEAR        = 35.0
+local SAMPLE_MIN              = 24
+local SAMPLE_MAX              = 107
+local MAX_POLYPHONY           = 16
+local MAX_PER_SAMPLE          = 4
+local POOL_SIZE               = 2
+local MAX_NEW_PER_FRAME       = 12
+local LOAD_PER_FRAME          = 8
+local SOUND_RANGE             = 1000.0
+local SOUND_NEAR              = 35.0
 
-local FREQ_MIN          = 0.25
-local FREQ_MAX          = 4.0
+local FREQ_MIN                = 0.25
+local FREQ_MAX                = 4.0
 
-local MUFFLE_GAIN       = 0.15   -- Volume when a solid wall is between listener and source.
-local MUFFLE_DOOR_GAIN  = 0.55   -- Open door between rooms.
-local MUFFLE_CHECK_MS   = 100    -- Cheap enough to skip most frames.
+local MUFFLE_GAIN             = 0.15 -- Volume when a solid wall is between listener and source.
+local MUFFLE_DOOR_GAIN        = 0.55 -- Open door between rooms.
+local MUFFLE_CHECK_MS         = 100 -- Cheap enough to skip most frames.
 
-local _weAreSettingPitch = false
+-- trying to fiure out not to make a mess with fast midi
+local MAX_SAME_NOTE           = 1
 
 -- stopAll can recurse from Dispose callbacks; guard that.
-local _isStopping       = false
-local _lastStopAllTime  = 0
-local STOP_ALL_DEBOUNCE_MS = 50
+local _isStopping             = false
+local _lastStopAllTime        = 0
+local STOP_ALL_DEBOUNCE_MS    = 50
 
-local _lastCleanupTime  = 0
-local CLEANUP_THROTTLE_MS = 30
+local _lastCleanupTime        = 0
+local CLEANUP_THROTTLE_MS     = 30
 
 SoundEngine.soundBanks        = {}
 SoundEngine.soundBankIdx      = {}
@@ -45,15 +46,15 @@ SoundEngine.notesThisFrame    = 0
 SoundEngine.initialized       = false
 SoundEngine.volumeMultiplier  = 1.0
 
-local _loadQueue    = nil
-local _loadDone     = false
-local _loadSamplesLoaded = 0
-local _loadObjectsLoaded = 0
+local _loadQueue              = nil
+local _loadDone               = false
+local _loadSamplesLoaded      = 0
+local _loadObjectsLoaded      = 0
 
-local _wallCheckAvailable = nil
-local _gapIterMethod      = nil
-local _lastMuffleCheck    = 0
-local _muffleLogCount     = 0
+local _wallCheckAvailable     = nil
+local _gapIterMethod          = nil
+local _lastMuffleCheck        = 0
+local _muffleLogCount         = 0
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -72,7 +73,7 @@ function SoundEngine.init()
         SoundEngine.soundBanks[inst]   = {}
         SoundEngine.soundBankIdx[inst] = {}
 
-        local soundDir = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
+        local soundDir                 = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
         for noteNum = SAMPLE_MIN, SAMPLE_MAX do
             local name = noteToName(noteNum)
             local path = soundDir .. inst .. "_" .. name .. ".ogg"
@@ -98,7 +99,9 @@ local function pumpLoadQueue()
                 fileExists = File.Exists(job.path)
             else
                 local f = io.open(job.path, "r")
-                if f then f:close(); fileExists = true end
+                if f then
+                    f:close(); fileExists = true
+                end
             end
         end)
 
@@ -114,10 +117,10 @@ local function pumpLoadQueue()
                     end)
                     pool[copy] = (ok2 and extra) or firstSound
                 end
-                SoundEngine.soundBanks[job.inst][job.noteNum]  = pool
+                SoundEngine.soundBanks[job.inst][job.noteNum]   = pool
                 SoundEngine.soundBankIdx[job.inst][job.noteNum] = 0
-                _loadSamplesLoaded = _loadSamplesLoaded + 1
-                _loadObjectsLoaded = _loadObjectsLoaded + #pool
+                _loadSamplesLoaded                              = _loadSamplesLoaded + 1
+                _loadObjectsLoaded                              = _loadObjectsLoaded + #pool
             end
         end
     end
@@ -413,18 +416,34 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument)
     end
 
     cleanupDead()
+    local sameNoteCount = 0
+    local oldestSameNoteIdx = nil
+
+    for i, info in ipairs(SoundEngine.activeChannels) do
+        if info.note == midiNote and info.instrument == instrument then
+            sameNoteCount = sameNoteCount + 1
+            if not oldestSameNoteIdx then
+                oldestSameNoteIdx = i
+            end
+        end
+    end
+
+    if sameNoteCount >= MAX_SAME_NOTE and oldestSameNoteIdx then
+        fadeDisposeChannel(oldestSameNoteIdx)
+    end
+
     voiceSteal(sampleNote, instrument)
     while #SoundEngine.activeChannels >= MAX_POLYPHONY do evictOldest() end
 
     local sound = getNextSound(instrument, sampleNote)
     if not sound then return nil end
 
-    local rawGain  = math.min(1.0, (velocity / 127))
+    local rawGain    = math.min(1.0, (velocity / 127))
     local volumeMult = MidiMod.CurrentVolume or SoundEngine.volumeMultiplier or 1.0
-    local baseGain = rawGain * volumeMult
+    local baseGain   = rawGain * volumeMult
 
     local wallStatus = checkWallStatus(worldPos)
-    local playGain = baseGain
+    local playGain   = baseGain
     if wallStatus == "wall" then
         playGain = baseGain * MUFFLE_GAIN
     elseif wallStatus == "open" then
@@ -470,7 +489,8 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument)
         rawGain    = rawGain,
         baseGain   = baseGain,
         worldPos   = worldPos,
-        wallStatus = wallStatus
+        wallStatus = wallStatus,
+        playTime   = os.clock()
     })
 
     return channel
@@ -531,8 +551,8 @@ Hook.Add("think", "midi_sound_tick", function()
                     newGain = effGain * MUFFLE_DOOR_GAIN
                 end
 
-                pcall(function() 
-                    info.channel.Gain = newGain 
+                pcall(function()
+                    info.channel.Gain = newGain
                     if info.channel.Sound then
                         info.channel.Sound.BaseGain = newGain
                     end
@@ -603,7 +623,7 @@ function SoundEngine.setVolume(v)
             newGain = effGain * MUFFLE_DOOR_GAIN
         end
 
-        pcall(function() 
+        pcall(function()
             info.channel.Gain = newGain
             if info.channel.Sound then
                 info.channel.Sound.BaseGain = newGain
