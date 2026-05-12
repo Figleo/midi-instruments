@@ -1,12 +1,12 @@
 -- Sends note bursts over the network so other clients hear roughly the same thing.
 
-MidiMod = MidiMod or {}
-MidiMod.Network = {}
+MidiMod              = MidiMod or {}
+MidiMod.Network      = {}
 
-local Network = MidiMod.Network
+local Network        = MidiMod.Network
 
-local NET_STOP = "MidiMod.Stop"
-local NET_NOTES = "MidiMod.Notes"
+local NET_STOP       = "MidiMod.Stop"
+local NET_NOTES      = "MidiMod.Notes"
 local NET_BUFF_START = "MidiMod.BuffStart"
 local NET_BUFF_TICK  = "MidiMod.BuffTick"
 local NET_BUFF_STOP  = "MidiMod.BuffStop"
@@ -51,12 +51,12 @@ function Network.initServer()
     end)
     Networking.Receive(NET_BUFF_START, function(message, client)
         local charID = message.ReadUInt16()
-        
+
         MidiMod.Log("[Server] Buff start for char " .. charID)
-        
+
         local character = nil
         pcall(function() character = Entity.FindEntityByID(charID) end)
-        
+
         if character then
             if not Network.activeMusicians then
                 Network.activeMusicians = {}
@@ -64,18 +64,17 @@ function Network.initServer()
             Network.activeMusicians[charID] = character
         end
     end)
-    
+
     Networking.Receive(NET_BUFF_STOP, function(message, client)
         local charID = message.ReadUInt16()
-        
+
         MidiMod.Log("[Server] Buff stop for char " .. charID)
-        
+
         if Network.activeMusicians then
             Network.activeMusicians[charID] = nil
         end
     end)
 end
-
 
 function Network.initClient()
     Networking.Receive(NET_NOTES, function(message)
@@ -98,15 +97,16 @@ end
 function Network.notifyBuffStart(character)
     if Game.IsSingleplayer then return end
     if not character then return end
-    
+
     local msg = Networking.Start(NET_BUFF_START)
     pcall(function() msg.WriteUInt16(character.ID) end)
     Networking.Send(msg)
 end
+
 function Network.notifyBuffStop(character)
     if Game.IsSingleplayer then return end
     if not character then return end
-    
+
     local msg = Networking.Start(NET_BUFF_STOP)
     pcall(function() msg.WriteUInt16(character.ID) end)
     Networking.Send(msg)
@@ -172,7 +172,7 @@ function Network.requestPlay(fileName, tempoMult)
     tempoMult = tempoMult or 1.0
 
     local character = Character.Controlled
-    if not character or not MidiMod.IsHoldingAccordion(character) then
+    if not character or not MidiMod.IsHoldingInstrument(character) then
         MidiMod.Log("Not holding instrument!")
         return
     end

@@ -241,7 +241,7 @@ end)
 
 Hook.Add("think", "MidiMod.GUI.Think", function()
     local ch = Character.Controlled
-    local holdingNow = ch and MidiMod.IsHoldingAccordion(ch) or false
+    local holdingNow = ch and MidiMod.IsHoldingInstrument(ch) or false
 
     if holdingNow and not wasHoldingInstrument then
         MGUI.togglePanel(true)

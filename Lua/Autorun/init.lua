@@ -51,7 +51,7 @@ function MidiMod.GetHeldInstrument(character)
 end
 
 -- Kept for older code; any supported instrument counts, not just accordion.
-function MidiMod.IsHoldingAccordion(character)
+function MidiMod.IsHoldingInstrument(character)
     return MidiMod.GetHeldInstrument(character) ~= nil
 end
 
@@ -96,7 +96,7 @@ pcall(function()
     if file then
         local content = file:read("*all")
         file:close()
-        
+
         local volume = string.match(content, 'MidiVolume[^>]*Value="([%d%.]+)"')
         if volume then
             local vol = tonumber(volume)
@@ -112,7 +112,7 @@ end)
 if CLIENT then
     local lastKnownVolume = MidiMod.CurrentVolume
     local checkCounter = 0
-    
+
     local function readVolumeFromXML()
         local volume = nil
         pcall(function()
@@ -120,7 +120,7 @@ if CLIENT then
             if file then
                 local content = file:read("*all")
                 file:close()
-                
+
                 local volumeStr = string.match(content, 'MidiVolume[^>]*Value="([%d%.]+)"')
                 if volumeStr then
                     volume = tonumber(volumeStr)
@@ -132,18 +132,18 @@ if CLIENT then
 
     Hook.Add("think", "midi_live_config", function()
         checkCounter = checkCounter + 1
-        
+
         if checkCounter % 30 ~= 0 then return end
-        
+
         local xmlVolume = readVolumeFromXML()
-        
+
         if xmlVolume and math.abs(xmlVolume - lastKnownVolume) > 0.001 then
             lastKnownVolume = xmlVolume
             MidiMod.CurrentVolume = xmlVolume
-            
+
             if MidiMod.SoundEngine then
                 MidiMod.SoundEngine.volumeMultiplier = xmlVolume
-                
+
                 if MidiMod.SoundEngine.setVolume then
                     MidiMod.SoundEngine.setVolume(xmlVolume)
                 end
