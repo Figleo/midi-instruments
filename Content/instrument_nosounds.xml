@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Override>
+  <Item name="" identifier="guitar" category="Misc" Tags="bigitem,instrument"
+        scale="0.5" description="" price="300" isshootable="true">
+    <Upgrade gameversion="0.9.2.0" scale="0.5"/>
+    <Price baseprice="50">
+      <Price storeidentifier="merchantoutpost" minavailable="1"/>
+      <Price storeidentifier="merchantcity" minavailable="1"/>
+      <Price storeidentifier="merchantresearch" sold="false" />
+      <Price storeidentifier="merchantmilitary" sold="false" />
+      <Price storeidentifier="merchantmine" sold="false" />
+    </Price>
+    <InventoryIcon texture="Content/Items/InventoryIconAtlas.png" sourcerect="512,256,64,64" origin="0.5,0.5" />
+    <Sprite texture="Content/Items/Misc/Misc.png" sourcerect="0,0,97,254" depth="0.6" origin="0.5,0.5" />
+    <Body radius="40" height="160" density="12" />
+    
+    <!-- reload="0" so Use() can fire every frame while playing -->
+    <RangedWeapon reload="0" />
+    
+    <Holdable slots="RightHand+LeftHand" controlpose="true"
+              aimpos="30,-20" handle1="-2,-40" handle2="5,50"
+              swingamount="10,20" swingspeed="1" swingwhenusing="true"
+              msg="ItemMsgPickUpSelect">
+      
+      <!-- Talent hook: OnUse every frame, no duration -->
+      <StatusEffect statuseffecttags="playingguitar" type="OnUse"
+                    target="Character" />
+    </Holdable>
+  </Item>
+
+  <Item name="" identifier="harmonica" category="Misc" Tags="smallitem,instrument"
+        cargocontaineridentifier="metalcrate" scale="0.5" description="" price="300"
+        impactsoundtag="impact_metal_light" isshootable="true">
+    <PreferredContainer primary="crewcab" spawnprobability="0.05" notcampaign="true"/>
+    <PreferredContainer secondary="wreckcrewcab,abandonedcrewcab,piratecrewcab" spawnprobability="0.1"/>
+    <Price baseprice="50">
+      <Price storeidentifier="merchantoutpost" minavailable="1"/>
+      <Price storeidentifier="merchantcity" minavailable="1"/>
+      <Price storeidentifier="merchantresearch" sold="false" />
+      <Price storeidentifier="merchantmilitary" sold="false" />
+      <Price storeidentifier="merchantmine" sold="false" />
+    </Price>
+    <Upgrade gameversion="0.9.2.0" scale="0.5"/>
+    <InventoryIcon texture="Content/Items/InventoryIconAtlas.png" sourcerect="576,256,64,64" origin="0.5,0.5" />
+    <Sprite texture="Content/Items/Misc/Misc.png" sourcerect="102,16,58,21" depth="0.6" origin="0.5,0.5" />
+    <Body width="58" height="20" density="15" />
+    
+    <RangedWeapon reload="0" />
+    
+    <Holdable slots="RightHand+LeftHand,Any" aimable="false"
+              aimpos="25,15" handle1="-10,0" handle2="0,0"
+              swingamount="20,0" swingspeed="0.5" swingwhenusing="true"
+              msg="ItemMsgPickUpSelect">
+      
+      <!-- Same idea as vanilla: OnUse, no duration -->
+      <StatusEffect statuseffecttags="playingharmonica" type="OnUse"
+                    target="Character" />
+    </Holdable>
+  </Item>
+
+  <Item name="" identifier="accordion" category="Misc" Tags="smallitem,instrument"
+        scale="0.5" description="" price="300"
+        impactsoundtag="impact_metal_light" isshootable="true">
+    <PreferredContainer primary="crewcab" spawnprobability="0.05" notcampaign="true"/>
+    <PreferredContainer secondary="wreckcrewcab,abandonedcrewcab,piratecrewcab" spawnprobability="0.1"/>
+    <Price baseprice="50">
+      <Price storeidentifier="merchantoutpost" minavailable="1"/>
+      <Price storeidentifier="merchantcity" minavailable="1"/>
+      <Price storeidentifier="merchantresearch" sold="false" />
+      <Price storeidentifier="merchantmilitary" sold="false" />
+      <Price storeidentifier="merchantmine" sold="false" />
+    </Price>
+    
+    <RangedWeapon reload="0" />
+    
+    <Upgrade gameversion="0.9.2.0" scale="0.5" />
+    <InventoryIcon texture="Content/Items/InventoryIconAtlas.png" sourcerect="576,956,64,64" origin="0.5,0.5" />
+    <Sprite texture="Content/Items/Misc/Misc.png" sourcerect="164,5,92,110" depth="0.55" origin="0.5,0.5" />
+    <Body width="92" height="110" density="20" />
+    
+    <Holdable slots="RightHand+LeftHand,Any" controlpose="true" aimable="false"
+              aimpos="50,-20" handle1="-20,0" handle2="-10,0"
+              swingamount="50,0" swingspeed="0.5" swingwhenusing="true"
+              msg="ItemMsgPickUpSelect">
+      
+      <!-- Tag for talents listening for accordion play -->
+      <StatusEffect statuseffecttags="playingaccordion" type="OnUse"
+                    target="Character" />
+    </Holdable>
+  </Item>
+</Override>

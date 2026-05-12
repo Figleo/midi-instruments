@@ -1,0 +1,8 @@
+<Override>
+  <Item name="MIDI Dummy" identifier="midiinstruments_dummy" category="Equipment" tags="smallitem" scale="0.5" description="Internal item for MIDI mod sync.">
+    <Sprite name="MIDI Dummy" texture="%ModDir%/Content/dummy.png" sourcerect="0,0,32,32" depth="0.55" origin="0.5,0.5" />
+    <Body width="10" height="10" density="1" />
+    <Pickable slots="Any" msg="ItemMsgPickUpSelect" />
+    <Price baseprice="0" />
+  </Item>
+</Override>

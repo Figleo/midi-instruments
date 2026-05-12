@@ -1,0 +1,35 @@
+[
+  {
+    "Keyword": "Sounds/accordion_notes/accordion_",
+    "GainMult": 0.9,
+    "RangeMult": 0.6,
+    "SidechainMult": 0,
+    "SidechainRelease": 0,
+    "Distortion": false,
+    "PitchMult": 1,
+    "MuffleInfluence": 1.3,
+    "KeywordExclusions": []
+  },
+  {
+    "Keyword": "Sounds/guitar_notes/guitar_",
+    "GainMult": 0.9,
+    "RangeMult": 0.6,
+    "SidechainMult": 0,
+    "SidechainRelease": 0,
+    "Distortion": false,
+    "PitchMult": 1,
+    "MuffleInfluence": 1.3,
+    "KeywordExclusions": []
+  },
+  {
+    "Keyword": "Sounds/harmonica_notes/harmonica_",
+    "GainMult": 0.9,
+    "RangeMult": 0.6,
+    "SidechainMult": 0,
+    "SidechainRelease": 0,
+    "Distortion": false,
+    "PitchMult": 1,
+    "MuffleInfluence": 1.3,
+    "KeywordExclusions": []
+  }
+]

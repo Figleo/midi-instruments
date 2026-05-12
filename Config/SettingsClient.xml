@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+  <Settings>
+    <Setting Name="MidiVolume" Type="rangeFloat" Min="0" Max="1" Steps="21" Value="0.75" />
+  </Settings>
+</Configuration>
