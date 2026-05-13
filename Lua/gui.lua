@@ -75,8 +75,8 @@ local function createPanel()
     frame.CanBeFocused = false
 
     -- Small window bottom-right with a fixed pixel size.
-    local panelW = 320
-    local panelH = 270
+    local panelW = 350
+    local panelH = 300
     panelFrame = GUI.Frame(
         GUI.RectTransform(Point(panelW, panelH), frame.RectTransform, GUI.Anchor.BottomRight),
         "GUIFrameListBox"
@@ -140,7 +140,7 @@ local function createPanel()
     local fileName = getFileName(MGUI.selectedFile)
 
     fileLabel = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.2), contentList.Content.RectTransform),
+        GUI.RectTransform(Vector2(1, 0.25), contentList.Content.RectTransform), -- Увеличили до 0.25
         string.format("[%d/%d] %s", MGUI.fileIndex, #MGUI.midiFiles, fileName),
         nil, nil, GUI.Alignment.Center
     )
@@ -204,7 +204,7 @@ local function createPanel()
     end
 
     local volHint = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.14), contentList.Content.RectTransform),
+        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform), -- Увеличили высоту
         "* You can change midi volume in\nesc - settings - mod gameplay settings *",
         nil, nil, GUI.Alignment.Center
     )
