@@ -36,17 +36,15 @@ function Network.initServer()
     end)
 
     Networking.Receive(NET_STOP, function(message, client)
-        MidiMod.Log("Server: " .. client.Name .. " requests stop")
+        local charID = message.ReadUInt16()
+        MidiMod.Log("Server: " .. client.Name .. " requests stop for char " .. charID)
 
         local broadcast = Networking.Start(NET_STOP)
+        broadcast.WriteUInt16(charID)
         for _, c in pairs(Client.ClientList) do
             if c ~= client then
                 Networking.Send(broadcast, c.Connection)
             end
-        end
-
-        if MidiMod.Player then
-            MidiMod.Player.stop()
         end
     end)
     Networking.Receive(NET_BUFF_START, function(message, client)
@@ -87,9 +85,16 @@ function Network.initClient()
     end)
 
     Networking.Receive(NET_STOP, function(message)
+        local charID = message.ReadUInt16()
         MidiMod.Log("Client: stop received")
-        if MidiMod.Player then
-            MidiMod.Player.stop()
+        if MidiMod.SoundEngine then
+            MidiMod.SoundEngine.stopAllForChar(charID)
+        end
+
+        local controlled = nil
+        pcall(function() controlled = Character.Controlled end)
+        if controlled and controlled.ID == charID then
+            if MidiMod.Player then MidiMod.Player.stop() end
         end
     end)
 end
@@ -139,14 +144,14 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         pcall(function() worldPos = character.WorldPosition end)
     end
 
-    if character and MidiMod.Player and MidiMod.Player.streamingCharacters then
+    if MidiMod.Player and MidiMod.Player.streamingCharacters then
         MidiMod.Player.streamingCharacters[charID] = os.clock()
     end
 
     for part in string.gmatch(notesStr, "([^;]+)") do
         local note, vel = string.match(part, "(%d+),(%d+)")
         if note and vel then
-            pcall(MidiMod.SoundEngine.playNote, tonumber(note), tonumber(vel), worldPos, instrId)
+            pcall(MidiMod.SoundEngine.playNote, tonumber(note), tonumber(vel), worldPos, instrId, charID)
         end
     end
 end
@@ -196,11 +201,26 @@ function Network.requestPlay(fileName, tempoMult)
 end
 
 function Network.requestStop()
-    if MidiMod.Player then MidiMod.Player.stop() end
+    local localChar = nil
+    local charID = nil
+
+    pcall(function()
+        localChar = Character.Controlled
+    end)
+
+    if MidiMod.Player and MidiMod.Player.playing then
+        if MidiMod.Player.sourceCharacter == localChar then
+            pcall(function() charID = localChar.ID end)
+            MidiMod.Player.stop()
+        end
+    end
 
     if Game.IsSingleplayer then return end
+    if not charID then return end
 
     local msg = Networking.Start(NET_STOP)
+    pcall(function() msg.WriteUInt16(charID) end)
+
     if SERVER then
         for _, c in pairs(Client.ClientList) do
             Networking.Send(msg, c.Connection)

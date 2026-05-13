@@ -24,7 +24,7 @@ local FREQ_MAX                = 4.0
 
 local MUFFLE_GAIN             = 0.15 -- Volume when a solid wall is between listener and source.
 local MUFFLE_DOOR_GAIN        = 0.55 -- Open door between rooms.
-local MUFFLE_CHECK_MS         = 100 -- Cheap enough to skip most frames.
+local MUFFLE_CHECK_MS         = 100  -- Cheap enough to skip most frames.
 
 -- trying to fiure out not to make a mess with fast midi
 local MAX_SAME_NOTE           = 1
@@ -55,6 +55,7 @@ local _wallCheckAvailable     = nil
 local _gapIterMethod          = nil
 local _lastMuffleCheck        = 0
 local _muffleLogCount         = 0
+local _weAreSettingPitch      = false
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -199,12 +200,14 @@ local function disposeChannel(idx)
     removeChannelAt(idx, false)
 end
 
-local function voiceSteal(sampleNote, instrument)
+local function voiceSteal(sampleNote, instrument, charID)
     local count = 0
     local oldestIdx = nil
 
     for i, info in ipairs(SoundEngine.activeChannels) do
-        if info.sampleNote == sampleNote and info.instrument == instrument then
+        if info.sampleNote == sampleNote
+            and info.instrument == instrument
+            and info.charID == charID then
             count = count + 1
             if not oldestIdx then oldestIdx = i end
         end
@@ -227,10 +230,21 @@ local function cleanupDead()
     end
 end
 
-local function evictOldest()
-    if #SoundEngine.activeChannels > 0 then
-        fadeDisposeChannel(1)
+local function evictOldestForChar(charID)
+    for i, info in ipairs(SoundEngine.activeChannels) do
+        if info.charID == charID then
+            fadeDisposeChannel(i)
+            return
+        end
     end
+end
+
+local function countChannelsForChar(charID)
+    local n = 0
+    for _, info in ipairs(SoundEngine.activeChannels) do
+        if info.charID == charID then n = n + 1 end
+    end
+    return n
 end
 
 local function getHullGaps(hull)
@@ -396,7 +410,7 @@ local function checkWallStatus(sourceWorldPos)
     return "wall"
 end
 
-local function doPlayNote(midiNote, velocity, worldPos, instrument)
+local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local bank = SoundEngine.soundBanks[instrument]
     if not bank or not next(bank) then
         bank = SoundEngine.soundBanks["accordion"]
@@ -432,8 +446,10 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument)
         fadeDisposeChannel(oldestSameNoteIdx)
     end
 
-    voiceSteal(sampleNote, instrument)
-    while #SoundEngine.activeChannels >= MAX_POLYPHONY do evictOldest() end
+    voiceSteal(sampleNote, instrument, charID)
+    while countChannelsForChar(charID) >= MAX_POLYPHONY do
+        evictOldestForChar(charID)
+    end
 
     local sound = getNextSound(instrument, sampleNote)
     if not sound then return nil end
@@ -470,10 +486,12 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument)
 
     SoundEngine.protectedChannels[channel] = finalFreq
 
+    MidiMod.Log(string.format("[PitchLog] Note: %d (%s) | Inst: %s | Sample: %d | Mult: %.4f",
+        midiNote, noteToName(midiNote), instrument, sampleNote, finalFreq))
+
     _weAreSettingPitch = true
     pcall(function() channel.FrequencyMultiplier = finalFreq end)
     _weAreSettingPitch = false
-
     if worldPos then
         pcall(function() channel.Near = SOUND_NEAR end)
         pcall(function() channel.Far = SOUND_RANGE end)
@@ -490,13 +508,14 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument)
         baseGain   = baseGain,
         worldPos   = worldPos,
         wallStatus = wallStatus,
-        playTime   = os.clock()
+        playTime   = os.clock(),
+        charID     = charID
     })
 
     return channel
 end
 
-function SoundEngine.playNote(midiNote, velocity, worldPos, instrument)
+function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     if not SoundEngine.initialized then SoundEngine.init() end
     instrument = instrument or "accordion"
 
@@ -509,7 +528,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument)
 
     if SoundEngine.notesThisFrame < MAX_NEW_PER_FRAME then
         SoundEngine.notesThisFrame = SoundEngine.notesThisFrame + 1
-        return doPlayNote(midiNote, velocity, worldPos, instrument)
+        return doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     end
 
     if #SoundEngine.noteQueue < 64 then
@@ -517,7 +536,8 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument)
             midiNote   = midiNote,
             velocity   = velocity,
             worldPos   = worldPos,
-            instrument = instrument
+            instrument = instrument,
+            charID     = charID
         })
     end
     return nil
@@ -551,12 +571,7 @@ Hook.Add("think", "midi_sound_tick", function()
                     newGain = effGain * MUFFLE_DOOR_GAIN
                 end
 
-                pcall(function()
-                    info.channel.Gain = newGain
-                    if info.channel.Sound then
-                        info.channel.Sound.BaseGain = newGain
-                    end
-                end)
+                pcall(function() info.channel.Gain = newGain end)
             end
         end
     end
@@ -570,7 +585,7 @@ Hook.Add("think", "midi_sound_tick", function()
     local played = 0
     while #SoundEngine.noteQueue > 0 and played < MAX_NEW_PER_FRAME do
         local entry = table.remove(SoundEngine.noteQueue, 1)
-        doPlayNote(entry.midiNote, entry.velocity, entry.worldPos, entry.instrument)
+        doPlayNote(entry.midiNote, entry.velocity, entry.worldPos, entry.instrument, entry.charID)
         played = played + 1
     end
 
@@ -609,6 +624,22 @@ function SoundEngine.stopAll()
     _isStopping = false
 end
 
+function SoundEngine.stopAllForChar(charID)
+    if not charID then return end
+
+    for i = #SoundEngine.noteQueue, 1, -1 do
+        if SoundEngine.noteQueue[i].charID == charID then
+            table.remove(SoundEngine.noteQueue, i)
+        end
+    end
+
+    for i = #SoundEngine.activeChannels, 1, -1 do
+        if SoundEngine.activeChannels[i].charID == charID then
+            fadeDisposeChannel(i)
+        end
+    end
+end
+
 -- Apply master volume to every live channel right away.
 function SoundEngine.setVolume(v)
     v = math.max(0.0, math.min(1.0, v))
@@ -623,12 +654,7 @@ function SoundEngine.setVolume(v)
             newGain = effGain * MUFFLE_DOOR_GAIN
         end
 
-        pcall(function()
-            info.channel.Gain = newGain
-            if info.channel.Sound then
-                info.channel.Sound.BaseGain = newGain
-            end
-        end)
+        pcall(function() info.channel.Gain = newGain end)
     end
 end
 

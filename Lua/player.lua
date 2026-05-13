@@ -1,10 +1,10 @@
 -- Schedules MIDI playback from whoever is holding the instrument.
 -- Stops automatically if they put the instrument away.
 
-MidiMod = MidiMod or {}
-MidiMod.Player = {}
+MidiMod                    = MidiMod or {}
+MidiMod.Player             = {}
 
-local Player = MidiMod.Player
+local Player               = MidiMod.Player
 
 Player.score               = nil
 Player.cursor              = 1
@@ -17,7 +17,7 @@ Player.currentFile         = nil
 Player.sourceCharacter     = nil
 Player.onStateChange       = nil
 Player.isStreamingHost     = false
-Player.streamingCharacters = {}  -- Network replay bookkeeping.
+Player.streamingCharacters = {} -- Network replay bookkeeping.
 
 function Player.loadFile(filePath)
     Player.stop()
@@ -85,7 +85,6 @@ function Player.play(character)
     if Player.onStateChange then
         pcall(Player.onStateChange, "play")
     end
-    
 end
 
 function Player.pause()
@@ -102,21 +101,33 @@ end
 function Player.stop()
     local wasPlaying = Player.playing
     local charForBuffNotify = Player.sourceCharacter
+
+    local isOurCharacter = false
+    pcall(function()
+        local controlled = Character.Controlled
+        isOurCharacter = (controlled and charForBuffNotify and controlled.ID == charForBuffNotify.ID)
+    end)
+
+    local resolvedCharID = nil
+    if charForBuffNotify then
+        pcall(function() resolvedCharID = charForBuffNotify.ID end)
+    end
+
     Player.playing = false
     Player.paused = false
     Player.cursor = 1
     Player.sourceCharacter = nil
     Player.isStreamingHost = false
-    if CLIENT and wasPlaying and charForBuffNotify and MidiMod.Network then
+    if CLIENT and wasPlaying and isOurCharacter and charForBuffNotify and MidiMod.Network then
         MidiMod.Network.notifyBuffStop(charForBuffNotify)
     end
-    
-    if MidiMod.SoundEngine then
-        pcall(MidiMod.SoundEngine.stopAll)
+
+    if MidiMod.SoundEngine and resolvedCharID then
+        pcall(MidiMod.SoundEngine.stopAllForChar, resolvedCharID)
     end
 
     if wasPlaying then
-        MidiMod.Log("Playback stopped")
+        MidiMod.Log("Playback stopped for char " .. tostring(resolvedCharID))
         if Player.onStateChange then
             pcall(Player.onStateChange, "stop")
         end
@@ -153,7 +164,7 @@ end
 
 local inputAim = nil
 pcall(function() inputAim = InputType.Aim end)
-inputAim = inputAim or 2
+inputAim                    = inputAim or 2
 
 local aimSuppressUntil      = 0
 local AIM_SUPPRESS_DURATION = 0.5
@@ -206,13 +217,13 @@ local function registerInstrumentHook()
     if instrumentHookRegistered then return end
     instrumentHookRegistered = true
 
-    Hook.Add("MidiMod.instrument.onUse", "MidiMod.buffHandler", 
+    Hook.Add("MidiMod.instrument.onUse", "MidiMod.buffHandler",
         function(effect, deltaTime, item, targets, worldPosition, element)
             if not Player.playing then return end
             MidiMod.Log("[Buff] Hook triggered for: " .. tostring(item and item.Name))
         end
     )
-    
+
     MidiMod.Log("[Buff] MidiMod.instrument.onUse hook registered")
 end
 
@@ -236,7 +247,7 @@ local function applyInstrumentOnUse(character)
     local ok, err = pcall(function()
         item.Use(dt, character)
     end)
-    
+
     if not ok then
         MidiMod.Log("[Buff] item.Use() failed: " .. tostring(err))
     end
@@ -253,21 +264,21 @@ end
 Game.AddCommand("testability", "Test ability system", function(args)
     local ch = Character.Controlled
     if not ch then return end
-    
+
     local _, item = MidiMod.GetHeldInstrument(ch)
-    if not item then 
+    if not item then
         MidiMod.Log("[Ability] No instrument held")
-        return 
+        return
     end
-    
+
     MidiMod.Log("[Ability] === Testing Ability System ===")
-    
+
     MidiMod.Log("[Ability] AbilityEffectType values:")
     pcall(function()
         MidiMod.Log("  OnUseItem = " .. tostring(AbilityEffectType.OnUseItem))
         MidiMod.Log("  OnItemUse = " .. tostring(AbilityEffectType.OnItemUse))
     end)
-    
+
     pcall(function()
         local abilityObject = LuaUserData.CreateStatic("Barotrauma.AbilityObject")
         if abilityObject then
@@ -279,22 +290,22 @@ Game.AddCommand("testability", "Test ability system", function(args)
             MidiMod.Log("[Ability] AbilityObject created: FAILED")
         end
     end)
-    
+
     pcall(function()
         if ch.CheckTalents then
             MidiMod.Log("[Ability] CheckTalents method: EXISTS")
-            
+
             local abilityObject = LuaUserData.CreateStatic("Barotrauma.AbilityObject")
             abilityObject.Item = item
             abilityObject.Character = ch
-            
+
             ch.CheckTalents(AbilityEffectType.OnUseItem, abilityObject)
             MidiMod.Log("[Ability] CheckTalents called OK")
         else
             MidiMod.Log("[Ability] CheckTalents method: NOT FOUND")
         end
     end)
-    
+
     MidiMod.Log("[Ability] === Limbs ===")
     pcall(function()
         if ch.AnimController and ch.AnimController.Limbs then
@@ -304,7 +315,7 @@ Game.AddCommand("testability", "Test ability system", function(args)
                 if limbType == LimbType.RightHand or limbType == LimbType.LeftHand then
                     count = count + 1
                     MidiMod.Log("  Hand limb #" .. count .. ", type=" .. tostring(limbType))
-                    
+
                     if limb.UpdateUseItem then
                         limb.UpdateUseItem(0.016)
                         MidiMod.Log("    UpdateUseItem called OK")
@@ -331,8 +342,8 @@ local function onThink()
         pcall(function() worldPos = Player.sourceCharacter.WorldPosition end)
     end
 
-    local now     = getTimeMs()
-    local elapsed = (now - Player.startTime) * Player.tempoMultiplier
+    local now         = getTimeMs()
+    local elapsed     = (now - Player.startTime) * Player.tempoMultiplier
     local streamBatch = {}
 
     while Player.cursor <= #Player.score do
@@ -420,7 +431,7 @@ if SERVER then
         if not MidiMod.Network or not MidiMod.Network.activeMusicians then
             return
         end
-        
+
         for charID, character in pairs(MidiMod.Network.activeMusicians) do
             local isValid = false
             pcall(function()
@@ -429,7 +440,7 @@ if SERVER then
                     isValid = (item ~= nil)
                 end
             end)
-            
+
             if isValid then
                 applyInstrumentOnUse(character)
             else
@@ -437,7 +448,7 @@ if SERVER then
             end
         end
     end)
-    
+
     MidiMod.Log("[Server] Buff apply hook registered")
 end
 
