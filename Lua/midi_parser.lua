@@ -5,9 +5,6 @@ MidiMod.MidiParser = {}
 
 local MidiParser = MidiMod.MidiParser
 
--- Also scan the mod's local Midi folder (handy while testing).
-local DEBUG_LOCAL = true
-
 local function readBytes(data, pos, count)
     return string.sub(data, pos, pos + count - 1), pos + count
 end
@@ -303,7 +300,8 @@ function MidiParser.listMidiFiles()
         scanFolder(storageMidiPath, files)
     end
 
-    if DEBUG_LOCAL then
+    -- takes midi From %MODDIR%/Midi instead of steam workshopFolder
+    if MidiMod.Debug then
         local localDir = basePath .. "Midi"
         local count = scanFolder(localDir, files)
         if count > 0 then
