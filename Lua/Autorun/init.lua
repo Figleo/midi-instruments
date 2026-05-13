@@ -10,8 +10,7 @@ end
 
 MidiMod = MidiMod or {}
 MidiMod.BasePath = basePath
-MidiMod.Version = "1.0.0"
-MidiMod.Debug = false
+MidiMod.Debug = true
 MidiMod.CurrentVolume = 0.75
 
 MidiMod.Instruments = {
@@ -21,12 +20,8 @@ MidiMod.Instruments = {
 }
 
 function MidiMod.Log(msg)
-    print("[MidiMod] " .. tostring(msg))
-end
-
-function MidiMod.DebugLog(msg)
     if MidiMod.Debug then
-        print("[MidiMod:Debug] " .. tostring(msg))
+        print("[MidiMod] " .. tostring(msg))
     end
 end
 
