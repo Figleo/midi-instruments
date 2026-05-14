@@ -71,18 +71,46 @@ if CLIENT then
     safeRequire("gui")
 end
 
-if MidiMod.SoundEngine then
-    local ok, err = pcall(MidiMod.SoundEngine.init)
-    if not ok then
-        MidiMod.Log("ERROR initializing sound engine: " .. tostring(err))
+-- SoundEngine
+if CLIENT then
+    if MidiMod.SoundEngine then
+        local ok, err = pcall(MidiMod.SoundEngine.init)
+        if not ok then
+            MidiMod.Log("ERROR initializing sound engine: " .. tostring(err))
+        else
+            MidiMod.Log("SoundEngine initialized successfully.")
+        end
+    else
+        MidiMod.Log("WARNING: MidiMod.SoundEngine is nil after require!")
     end
 end
 
+-- Initialize Player
+if MidiMod.Player then
+    if MidiMod.Player.init then
+        local ok, err = pcall(MidiMod.Player.init)
+        if not ok then
+            MidiMod.Log("ERROR initializing player: " .. tostring(err))
+        else
+            MidiMod.Log("Player initialized successfully.")
+        end
+    else
+        MidiMod.Log("Player module loaded (no init function).")
+    end
+else
+    MidiMod.Log("WARNING: MidiMod.Player is nil after require!")
+end
+
+-- Initialize Network last (depends on Player)
 if MidiMod.Network then
     local ok, err = pcall(MidiMod.Network.init)
     if not ok then
         MidiMod.Log("ERROR initializing network: " .. tostring(err))
+    else
+        MidiMod.Log("Network initialized successfully.")
     end
+else
+    MidiMod.Log("WARNING: MidiMod.Network is nil after require!")
 end
 
 -- MidiVolume from the companion settings XML if present.

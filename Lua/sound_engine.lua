@@ -594,22 +594,25 @@ Hook.Add("think", "midi_sound_tick", function()
     end
 end)
 
--- SPW
-Hook.Patch(
-    "Barotrauma.Sounds.SoundChannel",
-    "set_FrequencyMultiplier",
-    function(instance, ptable)
-        if _weAreSettingPitch then return end
-        if not instance then return end
+-- SPW патч: защищаем FrequencyMultiplier от перезаписи.
+-- Только на клиенте — Barotrauma.Sounds.SoundChannel не существует на сервере.
+if CLIENT then
+    Hook.Patch(
+        "Barotrauma.Sounds.SoundChannel",
+        "set_FrequencyMultiplier",
+        function(instance, ptable)
+            if _weAreSettingPitch then return end
+            if not instance then return end
 
-        local desired = SoundEngine.protectedChannels[instance]
-        if not desired then return end
-        _weAreSettingPitch = true
-        pcall(function() instance.FrequencyMultiplier = desired end)
-        _weAreSettingPitch = false
-    end,
-    Hook.HookMethodType.After
-)
+            local desired = SoundEngine.protectedChannels[instance]
+            if not desired then return end
+            _weAreSettingPitch = true
+            pcall(function() instance.FrequencyMultiplier = desired end)
+            _weAreSettingPitch = false
+        end,
+        Hook.HookMethodType.After
+    )
+end
 
 function SoundEngine.stopNote(midiNote)
     for i = #SoundEngine.noteQueue, 1, -1 do
