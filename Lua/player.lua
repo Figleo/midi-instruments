@@ -204,7 +204,7 @@ local TALENT_BUFFS      = {
 }
 local REQUIRED_PLAY_SEC = 10
 local BUFF_STRENGTH     = 60.0
-local SERVER_REFRESH    = 55
+local SERVER_REFRESH    = 11
 local CLIENT_REFRESH    = 8
 
 local function hasTalentChar(character, talentID)
