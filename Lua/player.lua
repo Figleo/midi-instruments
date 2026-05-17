@@ -1,202 +1,340 @@
-MidiMod = MidiMod or {}
-MidiMod.Player = MidiMod.Player or {}
+-- Playback Scheduler: plays MIDI from a character's instrument
+-- Singleton: one song at a time per client
+-- Includes RMB hold, buff system, and per-player network stop
 
-local Player = MidiMod.Player
+MidiMod                    = MidiMod or {}
+MidiMod.Player             = {}
 
-Player.activeSongs = Player.activeSongs or {}
-Player.streamingCharacters = Player.streamingCharacters or {}
+local Player               = MidiMod.Player
 
-function Player.init()
-    Player.activeSongs = {}
-    Player.streamingCharacters = {}
-    MidiMod.Log("Player module initialized")
-end
+Player.score               = nil
+Player.cursor              = 1
+Player.playing             = false
+Player.paused              = false
+Player.startTime           = 0
+Player.pauseTime           = 0
+Player.tempoMultiplier     = 1.0
+Player.currentFile         = nil
+Player.sourceCharacter     = nil
+Player.onStateChange       = nil
+Player.isStreamingHost     = false
+Player.streamingCharacters = {} -- tracks remote players streaming to us
 
-function Player.loadFile(filepath, charID)
+-- MIDI Loading
+
+function Player.loadFile(filePath)
+    Player.stop()
+
     if not MidiMod.MidiParser then
-        MidiMod.Log("ERROR: MidiParser not available")
+        MidiMod.Log("MidiParser not available!")
         return false
     end
 
-    local ok, result = pcall(function()
-        local score, header = MidiMod.MidiParser.parse(filepath)
-
-        if not score or #score == 0 then
-            MidiMod.Log("ERROR: No notes in MIDI file")
-            return false
-        end
-
-        local notes = {}
-        for i, note in ipairs(score) do
-            table.insert(notes, {
-                time     = note.timeMs / 1000.0,
-                pitch    = note.note,
-                velocity = note.velocity,
-                duration = note.durationMs / 1000.0,
-                channel  = note.channel
-            })
-        end
-
-        MidiMod.Log("MIDI Data loaded:")
-        MidiMod.Log("  - Notes count: " .. #notes)
-        MidiMod.Log("  - First note: pitch=" .. notes[1].pitch .. ", time=" .. notes[1].time .. "s")
-        MidiMod.Log("  - Last note time: " .. notes[#notes].time .. "s")
-        MidiMod.Log("  - Song duration: " .. math.floor(notes[#notes].time) .. " seconds")
-
-        Player.activeSongs[charID] = {
-            notes            = notes,
-            index            = 1,
-            lastTime         = nil,
-            startTime        = nil,
-            elapsedTime      = 0,
-            tempo            = 1.0,
-            isStreaming      = false,
-            paused           = false,
-            noInstrumentTime = nil
-        }
-        return true
+    local ok, score = pcall(function()
+        return MidiMod.MidiParser.parse(filePath)
     end)
 
     if not ok then
-        MidiMod.Log("ERROR in loadFile: " .. tostring(result))
+        MidiMod.Log("Failed to parse MIDI: " .. tostring(score))
         return false
     end
 
-    return result
+    if not score or #score == 0 then
+        MidiMod.Log("MIDI file has no notes: " .. filePath)
+        return false
+    end
+
+    Player.score = score
+    Player.cursor = 1
+    Player.currentFile = filePath
+    MidiMod.Log("Loaded MIDI: " .. #score .. " notes from " .. filePath)
+    return true
 end
 
-function Player.stopChar(charID)
-    if Player.activeSongs[charID] then
-        Player.activeSongs[charID] = nil
-        MidiMod.Log("Stopped playback for char " .. tostring(charID))
-    end
+-- Time
 
-    if Player.streamingCharacters[charID] then
-        Player.streamingCharacters[charID] = nil
+local function getTimeMs()
+    if Timing and Timing.TotalTime then
+        return Timing.TotalTime * 1000
     end
-
-    if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
-        MidiMod.SoundEngine.stopAllForChar(charID)
-    end
+    return os.clock() * 1000
 end
+
+-- Transport Controls
 
 function Player.play(character)
-    if not character then return end
-    local charID = character.ID
-
-    if not Player.activeSongs[charID] then
-        MidiMod.Log("No loaded song for char " .. tostring(charID))
+    if not Player.score or #Player.score == 0 then
+        MidiMod.Log("No MIDI loaded to play")
         return
     end
 
-    Player.activeSongs[charID].paused   = false
-    Player.activeSongs[charID].lastTime = nil
-    MidiMod.Log("Playing for char " .. tostring(charID))
-end
+    if character then
+        Player.sourceCharacter = character
+    end
 
-function Player.setTempo(charID, tempoMult)
-    if Player.activeSongs[charID] then
-        Player.activeSongs[charID].tempo = tempoMult or 1.0
+    if Player.paused then
+        local pausedDuration = getTimeMs() - Player.pauseTime
+        Player.startTime = Player.startTime + pausedDuration
+        Player.paused = false
+        Player.playing = true
+        MidiMod.Log("Playback resumed")
+    else
+        Player.cursor = 1
+        Player.startTime = getTimeMs()
+        Player.playing = true
+        Player.paused = false
+        MidiMod.Log("Playback started (" .. #Player.score .. " notes)")
+    end
+
+    if Player.onStateChange then
+        pcall(Player.onStateChange, "play")
     end
 end
 
-function Player.setStreamingHost(charID, isHost)
-    if Player.activeSongs[charID] then
-        Player.activeSongs[charID].isStreaming = isHost
-    end
-end
-
-if CLIENT then
-    local _playerUpdateTime = 0
-
-    Hook.Add("think", "MidiMod.Player.Update", function(deltaTime)
-        _playerUpdateTime = _playerUpdateTime + deltaTime
-        local now = _playerUpdateTime
-
-        for charID, song in pairs(Player.activeSongs) do
-            if not song.paused and song.notes then
-                local character = nil
-                pcall(function() character = Entity.FindEntityByID(charID) end)
-
-                local shouldStop = not character or character.IsDead
-
-                if not shouldStop then
-                    local instrId, item = MidiMod.GetHeldInstrument(character)
-
-                    if not instrId then
-                        if not song.noInstrumentTime then
-                            song.noInstrumentTime = now
-                        elseif (now - song.noInstrumentTime) > 0.5 then
-                            MidiMod.Log("No instrument held, stopping for char " .. tostring(charID))
-                            shouldStop = true
-                            if MidiMod.Network then MidiMod.Network.requestStop(charID) end
-                        end
-                    else
-                        song.noInstrumentTime = nil
-
-                        if not song.lastTime then
-                            song.lastTime = now
-                        end
-
-                        if not song.startTime then
-                            song.startTime = now
-                        end
-
-                        local frameDelta = (now - song.lastTime) * song.tempo
-                        song.lastTime    = now
-                        song.elapsedTime = song.elapsedTime + frameDelta
-
-                        local worldPos   = nil
-                        pcall(function()
-                            worldPos = item and item.WorldPosition or character.WorldPosition
-                        end)
-
-                        local notesPlayed = 0
-                        local streamBatch = {}
-
-                        while song.index <= #song.notes and notesPlayed < 10 do
-                            local note = song.notes[song.index]
-                            if note.time > song.elapsedTime then break end
-
-                            pcall(function()
-                                if MidiMod.SoundEngine and MidiMod.SoundEngine.playNote then
-                                    MidiMod.SoundEngine.playNote(
-                                        note.pitch or 60,
-                                        note.velocity or 80,
-                                        worldPos, instrId, charID
-                                    )
-                                end
-                            end)
-
-                            if song.isStreaming then
-                                table.insert(streamBatch,
-                                    (note.pitch or 60) .. "," .. (note.velocity or 80))
-                            end
-
-                            song.index  = song.index + 1
-                            notesPlayed = notesPlayed + 1
-                        end
-
-                        if #streamBatch > 0 and MidiMod.Network then
-                            MidiMod.Network.broadcastNotes(
-                                charID, table.concat(streamBatch, ";"), instrId)
-                        end
-
-                        if song.index > #song.notes then
-                            MidiMod.Log("Song finished for char " .. tostring(charID))
-                            shouldStop = true
-                            if MidiMod.Network then MidiMod.Network.requestStop(charID) end
-                        end
-                    end
-                end
-
-                if shouldStop then
-                    Player.stopChar(charID)
-                end
-            end
+function Player.pause()
+    if Player.playing and not Player.paused then
+        Player.paused = true
+        Player.pauseTime = getTimeMs()
+        MidiMod.Log("Playback paused")
+        if Player.onStateChange then
+            pcall(Player.onStateChange, "pause")
         end
+    end
+end
+
+function Player.stop()
+    local wasPlaying = Player.playing
+    Player.playing = false
+    Player.paused = false
+    Player.cursor = 1
+    Player.sourceCharacter = nil
+    Player.isStreamingHost = false
+
+    if MidiMod.SoundEngine then
+        pcall(MidiMod.SoundEngine.stopAll)
+    end
+
+    if wasPlaying then
+        MidiMod.Log("Playback stopped")
+        if Player.onStateChange then
+            pcall(Player.onStateChange, "stop")
+        end
+    end
+end
+
+-- Per-player stop: for network, stops sounds from a specific remote character
+function Player.stopChar(charID)
+    -- If this is our own character, do a full stop
+    if Player.sourceCharacter then
+        local ourID = nil
+        pcall(function() ourID = Player.sourceCharacter.ID end)
+        if ourID and ourID == charID then
+            Player.stop()
+            return
+        end
+    end
+
+    -- Otherwise just stop sounds for that remote character
+    if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
+        MidiMod.SoundEngine.stopAllForChar(charID)
+    end
+
+    Player.streamingCharacters[charID] = nil
+end
+
+function Player.setTempo(multiplier)
+    Player.tempoMultiplier = math.max(0.25, math.min(4.0, multiplier))
+end
+
+function Player.getProgress()
+    if not Player.score or #Player.score == 0 then return 0 end
+    return (Player.cursor - 1) / #Player.score
+end
+
+function Player.getTimeString()
+    if not Player.playing then return "0:00 / 0:00" end
+
+    local elapsed = (getTimeMs() - Player.startTime) * Player.tempoMultiplier
+    local total = Player.score[#Player.score].timeMs
+
+    local function formatTime(ms)
+        local s = math.floor(ms / 1000)
+        local m = math.floor(s / 60)
+        s = s % 60
+        return string.format("%d:%02d", m, s)
+    end
+
+    return formatTime(elapsed) .. " / " .. formatTime(total)
+end
+
+-- === AIM: Hold instrument via forced RMB input ===
+-- Suppressed when LMB is used on an interactable target
+
+local inputAim = nil
+pcall(function() inputAim = InputType.Aim end)
+inputAim = inputAim or 2
+
+local aimSuppressUntil = 0
+local AIM_SUPPRESS_DURATION = 0.5
+
+local function hasInteractTarget(character)
+    local found = false
+    pcall(function() found = (character.FocusedItem ~= nil) end)
+    if found then return true end
+    pcall(function() found = (character.SelectedItem ~= nil) end)
+    if found then return true end
+    pcall(function() found = (character.FocusedCharacter ~= nil) end)
+    if found then return true end
+    pcall(function() found = (character.SelectedConstruction ~= nil) end)
+    return found
+end
+
+local function forceAim(character)
+    if not character then return end
+
+    local isDead = true
+    pcall(function() isDead = character.IsDead end)
+    if isDead then return end
+
+    local now = os.clock()
+
+    local lmbHeld = false
+    pcall(function() lmbHeld = PlayerInput.PrimaryMouseButtonHeld() end)
+
+    if lmbHeld and hasInteractTarget(character) then
+        aimSuppressUntil = now + AIM_SUPPRESS_DURATION
+    end
+
+    if now < aimSuppressUntil then return end
+
+    pcall(function() character.SetInput(inputAim, false, true) end)
+    pcall(function()
+        local k = character.Keys[inputAim]
+        if k then k.Held = true end
     end)
 end
+
+-- === Note Playback Logic ===
+
+local function onThink()
+    if not Player.playing or Player.paused then return end
+    if not Player.score then return end
+
+    local currentInst, currentItem = MidiMod.GetHeldInstrument(Player.sourceCharacter)
+    currentInst = currentInst or "accordion"
+
+    local worldPos = nil
+    if currentItem then
+        pcall(function() worldPos = currentItem.WorldPosition end)
+    elseif Player.sourceCharacter then
+        pcall(function() worldPos = Player.sourceCharacter.WorldPosition end)
+    end
+
+    local now = getTimeMs()
+    local elapsed = (now - Player.startTime) * Player.tempoMultiplier
+    local streamBatch = {}
+
+    local charID = nil
+    pcall(function() charID = Player.sourceCharacter.ID end)
+
+    while Player.cursor <= #Player.score do
+        local note = Player.score[Player.cursor]
+        if note.timeMs <= elapsed then
+            if MidiMod.SoundEngine then
+                pcall(MidiMod.SoundEngine.playNote, note.note, note.velocity, worldPos, currentInst, charID)
+            end
+            if Player.isStreamingHost then
+                table.insert(streamBatch, note.note .. "," .. note.velocity)
+            end
+            Player.cursor = Player.cursor + 1
+        else
+            break
+        end
+    end
+
+    -- Send notes to other players
+    if Player.isStreamingHost and #streamBatch > 0 and Player.sourceCharacter then
+        local notesStr = table.concat(streamBatch, ";")
+        if MidiMod.Network and MidiMod.Network.broadcastNotes then
+            pcall(MidiMod.Network.broadcastNotes, charID, notesStr, currentInst)
+        end
+    end
+
+    -- Song finished
+    if Player.cursor > #Player.score then
+        MidiMod.Log("Playback complete")
+        local wasStreaming = Player.isStreamingHost
+        Player.playing = false
+        Player.paused = false
+
+        if Player.onStateChange then
+            pcall(Player.onStateChange, "stop")
+        end
+
+        -- Notify other players that we stopped
+        if wasStreaming and charID and MidiMod.Network then
+            pcall(MidiMod.Network.requestStop, charID)
+        end
+    end
+end
+
+-- === Injection Points ===
+
+-- ControlLocalPlayer fires every C# frame — most reliable for aim forcing
+pcall(function()
+    Hook.Patch(
+        "Barotrauma.Character",
+        "ControlLocalPlayer",
+        function(instance, ptable)
+            if instance ~= Player.sourceCharacter then return end
+            if not Player.playing then return end
+            forceAim(instance)
+        end,
+        Hook.HookMethodType.After
+    )
+    MidiMod.DebugLog("[Player] ControlLocalPlayer.After patch applied")
+end)
+
+-- Think hook: note playback + streaming tracker cleanup + aim backup
+Hook.Add("think", "MidiMod.Player.Think", function()
+    local clockNow = os.clock()
+
+    -- Clean up stale streaming entries (remote players who stopped)
+    for charID, lastUpdate in pairs(Player.streamingCharacters) do
+        if clockNow - lastUpdate > 1.0 then
+            Player.streamingCharacters[charID] = nil
+        end
+    end
+
+    if not Player.sourceCharacter or not Player.playing or Player.paused then
+        return
+    end
+
+    local ch = Player.sourceCharacter
+
+    -- Update streaming tracker for our own character
+    pcall(function()
+        Player.streamingCharacters[ch.ID] = clockNow
+    end)
+
+    -- Fail-safe aim (backup for ControlLocalPlayer patch)
+    forceAim(ch)
+
+    -- Stop if instrument was dropped
+    if not MidiMod.IsHoldingInstrument(ch) then
+        MidiMod.Log("Instrument dropped — stopping playback")
+        if MidiMod.Network then
+            pcall(MidiMod.Network.requestStop)
+        else
+            Player.stop()
+        end
+        return
+    end
+
+    onThink()
+end)
+
+-- === BUFF SYSTEM (Server-side affliction application) ===
 
 local TALENT_BUFFS      = {
     steadytune     = "psychosisimmunity",
@@ -204,8 +342,8 @@ local TALENT_BUFFS      = {
 }
 local REQUIRED_PLAY_SEC = 10
 local BUFF_STRENGTH     = 60.0
-local SERVER_REFRESH    = 11
-local CLIENT_REFRESH    = 8
+-- Longer interval = fewer server events = less chance of pipe overload
+local SERVER_REFRESH    = 30
 
 local function hasTalentChar(character, talentID)
     local found = false
@@ -228,7 +366,33 @@ local function hasTalentChar(character, talentID)
     return found
 end
 
+-- Check if the character already has this affliction at sufficient strength
+-- to avoid redundant ApplyAffliction calls (each one generates a server sync event)
+local function getAfflictionStrength(character, afflictionID)
+    local strength = 0
+    pcall(function()
+        local prefab = AfflictionPrefab.Prefabs[afflictionID]
+        if prefab and character.CharacterHealth then
+            local affliction = character.CharacterHealth.GetAffliction(afflictionID)
+            if affliction then
+                strength = affliction.Strength
+            end
+        end
+    end)
+    return strength
+end
+
 local function applyAffliction(character, afflictionID, strength)
+    -- Skip if the character already has this affliction at high enough strength
+    -- This prevents generating unnecessary server entity events
+    local current = getAfflictionStrength(character, afflictionID)
+    if current >= strength * 0.5 then
+        MidiMod.DebugLog(string.format(
+            "[ServerBuff] Skipping %s (current=%.1f, threshold=%.1f)",
+            afflictionID, current, strength * 0.5))
+        return
+    end
+
     pcall(function()
         local prefab = AfflictionPrefab.Prefabs[afflictionID]
         if prefab and character.CharacterHealth then
@@ -249,19 +413,19 @@ if SERVER then
                     playStart = _serverTime,
                     lastApply = 0
                 }
-                MidiMod.Log("[ServerBuff] Tracking char " .. tostring(charID))
+                MidiMod.DebugLog("[ServerBuff] Tracking char " .. tostring(charID))
             end
         end)
 
     Hook.Add("MidiMod.Server.BuffStop", "MidiMod.Server.HandleStop",
         function(charID)
             serverTimers[charID] = nil
-            MidiMod.Log("[ServerBuff] Stopped tracking char " .. tostring(charID))
+            MidiMod.DebugLog("[ServerBuff] Stopped tracking char " .. tostring(charID))
         end)
 
     Hook.Add("think", "MidiMod.Server.BuffApply", function(deltaTime)
         _serverTime = _serverTime + deltaTime
-        local now   = _serverTime
+        local now = _serverTime
 
         for charID, timer in pairs(serverTimers) do
             local playedEnough = (now - timer.playStart) >= REQUIRED_PLAY_SEC
@@ -277,7 +441,7 @@ if SERVER then
                     for talentID, afflictionID in pairs(TALENT_BUFFS) do
                         if hasTalentChar(character, talentID) then
                             applyAffliction(character, afflictionID, BUFF_STRENGTH)
-                            MidiMod.Log(string.format(
+                            MidiMod.DebugLog(string.format(
                                 "[ServerBuff] Applied %s to char %d",
                                 afflictionID, charID))
                         end
@@ -291,46 +455,4 @@ if SERVER then
     end)
 end
 
-if CLIENT then
-    local clientTimers = {}
-    local _clientTime  = 0
-
-    Hook.Add("think", "MidiMod.Client.BuffApply", function(deltaTime)
-        _clientTime = _clientTime + deltaTime
-        local now   = _clientTime
-        for charID in pairs(Player.activeSongs) do
-            if not clientTimers[charID] then
-                clientTimers[charID] = {
-                    playStart = now,
-                    lastApply = 0
-                }
-            end
-        end
-        for charID in pairs(clientTimers) do
-            if not Player.activeSongs[charID] then
-                clientTimers[charID] = nil
-            end
-        end
-
-        for charID, timer in pairs(clientTimers) do
-            local playedEnough = (now - timer.playStart) >= REQUIRED_PLAY_SEC
-            local refreshReady = (now - timer.lastApply) >= CLIENT_REFRESH
-
-            if playedEnough and refreshReady then
-                local controlled = nil
-                pcall(function() controlled = Character.Controlled end)
-
-                if controlled and controlled.ID == charID then
-                    for talentID, afflictionID in pairs(TALENT_BUFFS) do
-                        if hasTalentChar(controlled, talentID) then
-                            applyAffliction(controlled, afflictionID, BUFF_STRENGTH)
-                        end
-                    end
-                    timer.lastApply = now
-                end
-            end
-        end
-    end)
-end
-
-MidiMod.Log("[Player] Loaded. Multi-instance + Hybrid Buffs (server=50s, client=5s).")
+MidiMod.Log("[Player] Loaded. RMB hold + server buffs enabled.")

@@ -261,6 +261,8 @@ function MidiParser.parse(filePath)
     return score, header
 end
 
+-- Searching MIDI files
+
 local MIDI_STORAGE_WORKSHOP_ID = "3695216167"
 
 local function scanFolder(dir, results)
@@ -289,6 +291,7 @@ function MidiParser.listMidiFiles()
     local files = {}
     local basePath = MidiMod.BasePath or ""
 
+    -- Workshop storage
     local workshopFolder = basePath:match("(.*[/\\])[^/\\]+[/\\]?$")
     local storageMidiPath = nil
 
@@ -300,12 +303,12 @@ function MidiParser.listMidiFiles()
         scanFolder(storageMidiPath, files)
     end
 
-    -- takes midi From %MODDIR%/Midi instead of steam workshopFolder
+    -- Local folder — controlled by MidiMod.Debug
     if MidiMod.Debug then
         local localDir = basePath .. "Midi"
         local count = scanFolder(localDir, files)
         if count > 0 then
-            MidiMod.Log("[MidiParser] DEBUG: Loaded " .. count .. " files from " .. localDir)
+            MidiMod.DebugLog("[MidiParser] Loaded " .. count .. " files from " .. localDir)
         end
     end
 
@@ -313,8 +316,7 @@ function MidiParser.listMidiFiles()
         MidiMod.Log("[MidiParser] Found " .. #files .. " MIDI files")
     else
         MidiMod.Log("[MidiParser] No .mid files found.")
-        MidiMod.Log("As of March 2026, MIDI files live in the MIDI Storage companion mod, not here.")
-        MidiMod.Log("Install MIDI Storage from the Workshop (ID " .. MIDI_STORAGE_WORKSHOP_ID .. ").")
+        MidiMod.Log("Install 'MIDI Storage' from Workshop (ID " .. MIDI_STORAGE_WORKSHOP_ID .. ").")
         if storageMidiPath then
             MidiMod.Log("Drop your files under: " .. storageMidiPath)
         else

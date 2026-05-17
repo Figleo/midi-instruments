@@ -10,7 +10,13 @@ end
 
 MidiMod = MidiMod or {}
 MidiMod.BasePath = basePath
+MidiMod.Version = "1.1.0"
+
+-- ====== SINGLE DEBUG TOGGLE ======
+-- Set to true to enable all debug logging across the entire mod.
 MidiMod.Debug = true
+
+-- Client-side volume (loaded from companion mod XML settings)
 MidiMod.CurrentVolume = 0.75
 
 MidiMod.Instruments = {
@@ -19,13 +25,19 @@ MidiMod.Instruments = {
     ["harmonica"] = true
 }
 
+-- Always prints (important messages only)
 function MidiMod.Log(msg)
+    print("[MidiMod] " .. tostring(msg))
+end
+
+-- Only prints when MidiMod.Debug is true
+function MidiMod.DebugLog(msg)
     if MidiMod.Debug then
-        print("[MidiMod] " .. tostring(msg))
+        print("[MidiMod:Debug] " .. tostring(msg))
     end
 end
 
--- Returns instrument id and item for the first supported hand instrument, or nil.
+-- Get the ID and Item of the supported instrument the character is holding
 function MidiMod.GetHeldInstrument(character)
     if not character then return nil, nil end
     local ok, id, itemObj = pcall(function()
@@ -45,10 +57,12 @@ function MidiMod.GetHeldInstrument(character)
     return nil, nil
 end
 
--- Kept for older code; any supported instrument counts, not just accordion.
+-- Backward compat alias
 function MidiMod.IsHoldingInstrument(character)
     return MidiMod.GetHeldInstrument(character) ~= nil
 end
+
+MidiMod.IsHoldingAccordion = MidiMod.IsHoldingInstrument
 
 MidiMod.Log("Base path: " .. MidiMod.BasePath)
 
@@ -71,108 +85,62 @@ if CLIENT then
     safeRequire("gui")
 end
 
--- SoundEngine
+-- SoundEngine init (client-only, server has no audio)
 if CLIENT then
     if MidiMod.SoundEngine then
         local ok, err = pcall(MidiMod.SoundEngine.init)
         if not ok then
             MidiMod.Log("ERROR initializing sound engine: " .. tostring(err))
-        else
-            MidiMod.Log("SoundEngine initialized successfully.")
         end
-    else
-        MidiMod.Log("WARNING: MidiMod.SoundEngine is nil after require!")
     end
 end
 
--- Initialize Player
-if MidiMod.Player then
-    if MidiMod.Player.init then
-        local ok, err = pcall(MidiMod.Player.init)
-        if not ok then
-            MidiMod.Log("ERROR initializing player: " .. tostring(err))
-        else
-            MidiMod.Log("Player initialized successfully.")
-        end
-    else
-        MidiMod.Log("Player module loaded (no init function).")
-    end
-else
-    MidiMod.Log("WARNING: MidiMod.Player is nil after require!")
-end
-
--- Initialize Network last (depends on Player)
+-- Network init (both client and server)
 if MidiMod.Network then
     local ok, err = pcall(MidiMod.Network.init)
     if not ok then
         MidiMod.Log("ERROR initializing network: " .. tostring(err))
-    else
-        MidiMod.Log("Network initialized successfully.")
     end
-else
-    MidiMod.Log("WARNING: MidiMod.Network is nil after require!")
 end
 
--- MidiVolume from the companion settings XML if present.
-pcall(function()
-    local file = io.open("Data/Mods/MIDIInstruments/SettingsData.xml", "r")
-    if file then
-        local content = file:read("*all")
-        file:close()
-
-        local volume = string.match(content, 'MidiVolume[^>]*Value="([%d%.]+)"')
-        if volume then
-            local vol = tonumber(volume)
-            if vol then
-                MidiMod.CurrentVolume = math.max(0.0, math.min(1.0, vol))
-                MidiMod.Log("Volume loaded from settings: " .. MidiMod.CurrentVolume)
-            end
+-- Read volume from companion settings XML
+local function readVolumeFromXML()
+    local volume = nil
+    pcall(function()
+        local file = io.open("Data/Mods/MIDIInstruments/SettingsData.xml", "r")
+        if file then
+            local content = file:read("*all")
+            file:close()
+            local volumeStr = string.match(content, 'MidiVolume[^>]*Value="([%d%.]+)"')
+            if volumeStr then volume = tonumber(volumeStr) end
         end
-    end
-end)
+    end)
+    return volume
+end
 
--- Poll settings occasionally so volume changes apply without a restart.
+-- Load initial volume
+local xmlVol = readVolumeFromXML()
+if xmlVol then
+    MidiMod.CurrentVolume = math.max(0.0, math.min(1.0, xmlVol))
+    MidiMod.Log("Volume loaded from settings: " .. MidiMod.CurrentVolume)
+end
+
+-- Poll volume changes periodically (client only, every ~2 seconds)
 if CLIENT then
     local lastKnownVolume = MidiMod.CurrentVolume
     local checkCounter = 0
 
-    local function readVolumeFromXML()
-        local volume = nil
-        pcall(function()
-            local file = io.open("Data/Mods/MIDIInstruments/SettingsData.xml", "r")
-            if file then
-                local content = file:read("*all")
-                file:close()
-
-                local volumeStr = string.match(content, 'MidiVolume[^>]*Value="([%d%.]+)"')
-                if volumeStr then
-                    volume = tonumber(volumeStr)
-                end
-            end
-        end)
-        return volume
-    end
-
     Hook.Add("think", "midi_live_config", function()
         checkCounter = checkCounter + 1
+        if checkCounter % 120 ~= 0 then return end
 
-        if checkCounter % 30 ~= 0 then return end
-
-        local xmlVolume = readVolumeFromXML()
-
-        if xmlVolume and math.abs(xmlVolume - lastKnownVolume) > 0.001 then
-            lastKnownVolume = xmlVolume
-            MidiMod.CurrentVolume = xmlVolume
-
-            if MidiMod.SoundEngine then
-                MidiMod.SoundEngine.volumeMultiplier = xmlVolume
-
-                if MidiMod.SoundEngine.setVolume then
-                    MidiMod.SoundEngine.setVolume(xmlVolume)
-                end
-            end
+        local vol = readVolumeFromXML()
+        if vol and math.abs(vol - lastKnownVolume) > 0.001 then
+            lastKnownVolume = vol
+            MidiMod.CurrentVolume = math.max(0.0, math.min(1.0, vol))
+            MidiMod.DebugLog("Volume changed to: " .. MidiMod.CurrentVolume)
         end
     end)
 end
 
-MidiMod.Log("Initialization complete.")
+MidiMod.Log("=== Initialization complete ===")

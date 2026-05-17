@@ -13,13 +13,11 @@ MGUI.midiFiles = {}
 MGUI.selectedFile = nil
 MGUI.fileIndex = 1
 MGUI.tempoValue = 1.0
--- Loudness comes from mod settings (see sound_engine.lua), not from this UI.
 
 -- Did we have an instrument equipped last frame? Used for auto open/close.
 local wasHoldingInstrument = false
 
 -- Refresh the list of .mid files from disk.
-
 local function refreshFileList()
     MGUI.midiFiles = {}
     if MidiMod.MidiParser then
@@ -35,7 +33,6 @@ local function getFileName(path)
 end
 
 -- UI widgets
-
 local frame = nil      -- Full-screen invisible layer so the panel can sit on top.
 local panelFrame = nil -- The visible box you drag around.
 local titleText = nil
@@ -49,7 +46,6 @@ local function destroyPanel()
     if frame then
         pcall(function() frame.Visible = false end)
         pcall(function()
-            -- Detach from the GUI tree so everything gets torn down.
             frame.RectTransform.Parent = nil
         end)
     end
@@ -89,8 +85,7 @@ local function createPanel()
         end)
     end
 
-    -- Drag by the title strip. The GUIDragIndicator icon is pinned to the left;
-    -- dragging still works across the entire header width.
+    -- Drag handle for the title strip
     local titleDrag = GUI.DragHandle(
         GUI.RectTransform(Vector2(1, 0.14), panelFrame.RectTransform, GUI.Anchor.TopCenter),
         panelFrame.RectTransform,
@@ -140,7 +135,7 @@ local function createPanel()
     local fileName = getFileName(MGUI.selectedFile)
 
     fileLabel = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.25), contentList.Content.RectTransform), -- Увеличили до 0.25
+        GUI.RectTransform(Vector2(1, 0.25), contentList.Content.RectTransform),
         string.format("[%d/%d] %s", MGUI.fileIndex, #MGUI.midiFiles, fileName),
         nil, nil, GUI.Alignment.Center
     )
@@ -204,7 +199,7 @@ local function createPanel()
     end
 
     local volHint = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform), -- Увеличили высоту
+        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform),
         "* You can change midi volume in\nesc - settings - mod gameplay settings *",
         nil, nil, GUI.Alignment.Center
     )
@@ -232,7 +227,6 @@ function MGUI.togglePanel(show)
 end
 
 -- Hook into the screen GUI pass so our overlay actually draws.
-
 Hook.Patch("Barotrauma.GameScreen", "AddToGUIUpdateList", function()
     if frame and MGUI.isOpen then
         frame.AddToGUIUpdateList()
@@ -243,22 +237,26 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     local ch = Character.Controlled
     local holdingNow = ch and MidiMod.IsHoldingInstrument(ch) or false
 
+    -- Auto-open when picking up instrument
     if holdingNow and not wasHoldingInstrument then
         MGUI.togglePanel(true)
     end
 
+    -- Auto-close when dropping instrument
     if not holdingNow and wasHoldingInstrument then
         MGUI.togglePanel(false)
     end
 
     wasHoldingInstrument = holdingNow
 
+    -- F5 toggle (only while holding instrument)
     local f5Pressed = false
     pcall(function() f5Pressed = PlayerInput.KeyHit(Keys.F5) end)
     if f5Pressed and holdingNow then
         MGUI.togglePanel()
     end
 
+    -- Update status text
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
             if MidiMod.Player.playing then
@@ -272,4 +270,4 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     end
 end)
 
-MidiMod.Log("[MidiMod] GUI Initialized. Panel auto-shows on instrument pickup. Toggle: F5")
+MidiMod.Log("[GUI] Initialized. Panel auto-shows on instrument pickup. Toggle: F5")

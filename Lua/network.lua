@@ -1,14 +1,15 @@
-MidiMod                  = MidiMod or {}
-MidiMod.Network          = {}
+-- Network: real-time note sync for multiplayer
+-- Direct send (no buffering) to avoid server event spam
 
-local Network            = MidiMod.Network
+MidiMod = MidiMod or {}
+MidiMod.Network = {}
 
-local NET_STOP           = "MidiMod.Stop"
-local NET_NOTES          = "MidiMod.Notes"
-local NET_BUFF_START     = "MidiMod.BuffStart"
-local NET_BUFF_STOP      = "MidiMod.BuffStop"
-local _networkClientTime = 0
+local Network = MidiMod.Network
 
+local NET_STOP       = "MidiMod.Stop"
+local NET_NOTES      = "MidiMod.Notes"
+local NET_BUFF_START = "MidiMod.BuffStart"
+local NET_BUFF_STOP  = "MidiMod.BuffStop"
 
 function Network.init()
     if SERVER then Network.initServer() end
@@ -16,37 +17,45 @@ function Network.init()
 end
 
 function Network.initServer()
+    -- Relay notes from one client to all others
     Networking.Receive(NET_NOTES, function(message, client)
         local charID   = message.ReadUInt16()
         local notesStr = message.ReadString()
         local instrId  = "accordion"
         pcall(function() instrId = message.ReadString() end)
 
+        -- One message object, sent to every other client
+        local broadcast = Networking.Start(NET_NOTES)
+        broadcast.WriteUInt16(charID)
+        broadcast.WriteString(notesStr)
+        broadcast.WriteString(instrId)
+
         for _, c in pairs(Client.ClientList) do
             if c ~= client then
-                local broadcast = Networking.Start(NET_NOTES)
-                broadcast.WriteUInt16(charID)
-                broadcast.WriteString(notesStr)
-                broadcast.WriteString(instrId)
                 Networking.Send(broadcast, c.Connection)
             end
         end
     end)
 
+    -- Per-player stop: relay charID to other clients
     Networking.Receive(NET_STOP, function(message, client)
         local charID = message.ReadUInt16()
-        MidiMod.Log("Server: " .. client.Name .. " requests stop for char " .. tostring(charID))
+        MidiMod.DebugLog("Server: " .. client.Name .. " requests stop for char " .. tostring(charID))
+
+        local broadcast = Networking.Start(NET_STOP)
+        broadcast.WriteUInt16(charID)
 
         for _, c in pairs(Client.ClientList) do
             if c ~= client then
-                local broadcast = Networking.Start(NET_STOP)
-                broadcast.WriteUInt16(charID)
                 Networking.Send(broadcast, c.Connection)
             end
         end
+
+        -- Notify buff system that this character stopped playing
         Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
 
+    -- Buff notifications
     Networking.Receive(NET_BUFF_START, function(message, client)
         local charID    = message.ReadUInt16()
         local character = client.Character
@@ -62,24 +71,23 @@ function Network.initServer()
 end
 
 function Network.initClient()
+    -- Receive streamed notes from other players
     Networking.Receive(NET_NOTES, function(message)
         local charID   = message.ReadUInt16()
         local notesStr = message.ReadString()
         local instrId  = "accordion"
         pcall(function() instrId = message.ReadString() end)
+
         Network.playStreamedNotes(charID, notesStr, instrId)
     end)
 
+    -- Per-player stop received from server
     Networking.Receive(NET_STOP, function(message)
         local charID = message.ReadUInt16()
-        MidiMod.Log("Client: stop received for char " .. tostring(charID))
-        if MidiMod.Player then MidiMod.Player.stopChar(charID) end
-        if MidiMod.SoundEngine then
-            pcall(function()
-                if MidiMod.SoundEngine.stopAllForChar then
-                    MidiMod.SoundEngine.stopAllForChar(charID)
-                end
-            end)
+        MidiMod.DebugLog("Client: stop received for char " .. tostring(charID))
+
+        if MidiMod.Player then
+            MidiMod.Player.stopChar(charID)
         end
     end)
 end
@@ -91,8 +99,10 @@ function Network.resolveMidiPath(fileName)
     return MidiMod.BasePath .. "Midi/" .. fileName
 end
 
+-- Play notes received from a remote player
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
+
     local character = nil
     pcall(function() character = Entity.FindEntityByID(charID) end)
 
@@ -106,6 +116,7 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
     end
 
+    -- Track that this character is streaming music
     if MidiMod.Player and MidiMod.Player.streamingCharacters then
         MidiMod.Player.streamingCharacters[charID] = os.clock()
     end
@@ -114,92 +125,73 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         local note, vel = string.match(part, "(%d+),(%d+)")
         if note and vel then
             pcall(function()
-                if MidiMod.SoundEngine.playNote then
-                    MidiMod.SoundEngine.playNote(
-                        tonumber(note), tonumber(vel),
-                        worldPos, instrId, charID
-                    )
-                end
+                MidiMod.SoundEngine.playNote(
+                    tonumber(note), tonumber(vel),
+                    worldPos, instrId, charID
+                )
             end)
         end
     end
 end
 
-local NOTE_FLUSH_INTERVAL_MS = 500
-local MAX_NOTES_PER_FLUSH    = 32
-
-Network._noteBuf             = {}
-Network._lastFlushMs         = 0
+-- Lightweight throttle: accumulate notes and send at most every 200ms
+-- This prevents frame-by-frame network spam on fast MIDIs
+local _pendingNotes = {}  -- charID -> {instrId, parts={}}
+local _lastSendTime = 0
+local SEND_INTERVAL = 0.2  -- seconds
 
 function Network.broadcastNotes(charID, notesStr, instrId)
     if Game.IsSingleplayer then return end
-    if not Network._noteBuf[charID] then
-        Network._noteBuf[charID] = {
-            instrId = instrId or "accordion",
-            notes = {}
-        }
+
+    -- Accumulate notes
+    if not _pendingNotes[charID] then
+        _pendingNotes[charID] = { instrId = instrId or "accordion", parts = {} }
     end
-    local buf = Network._noteBuf[charID]
-    buf.instrId = instrId or buf.instrId
-    for part in string.gmatch(notesStr, "([^;]+)") do
-        if #buf.notes < 500 then
-            table.insert(buf.notes, part)
-        end
-    end
+    local pending = _pendingNotes[charID]
+    pending.instrId = instrId or pending.instrId
+    table.insert(pending.parts, notesStr)
 end
 
-local function flushNoteBuffer()
-    for charID, buf in pairs(Network._noteBuf) do
-        local notes = buf.notes
-        if #notes == 0 then
-            Network._noteBuf[charID] = nil
-        else
-            local i = 1
-            while i <= #notes do
-                local slice = {}
-                for j = i, math.min(i + MAX_NOTES_PER_FLUSH - 1, #notes) do
-                    table.insert(slice, notes[j])
+-- Flush pending notes on a timer (called from think hook below)
+local function flushPendingNotes()
+    local now = os.clock()
+    if (now - _lastSendTime) < SEND_INTERVAL then return end
+    _lastSendTime = now
+
+    for charID, pending in pairs(_pendingNotes) do
+        if #pending.parts > 0 then
+            local combined = table.concat(pending.parts, ";")
+
+            local msg = Networking.Start(NET_NOTES)
+            msg.WriteUInt16(charID)
+            msg.WriteString(combined)
+            msg.WriteString(pending.instrId)
+
+            if SERVER then
+                for _, c in pairs(Client.ClientList) do
+                    Networking.Send(msg, c.Connection)
                 end
-                local chunk = table.concat(slice, ";")
-                if SERVER then
-                    for _, c in pairs(Client.ClientList) do
-                        local msg = Networking.Start(NET_NOTES)
-                        msg.WriteUInt16(charID)
-                        msg.WriteString(chunk)
-                        msg.WriteString(buf.instrId)
-                        Networking.Send(msg, c.Connection)
-                    end
-                else
-                    local msg = Networking.Start(NET_NOTES)
-                    msg.WriteUInt16(charID)
-                    msg.WriteString(chunk)
-                    msg.WriteString(buf.instrId)
-                    Networking.Send(msg)
-                end
-                i = i + MAX_NOTES_PER_FLUSH
+            else
+                Networking.Send(msg)
             end
-            Network._noteBuf[charID] = nil
         end
     end
+    _pendingNotes = {}
 end
 
-Hook.Add("think", "MidiMod.Network.FlushNotes", function(deltaTime)
-    if not CLIENT then return end
-    _networkClientTime = _networkClientTime + deltaTime
-    local nowMs = _networkClientTime * 1000
-
-    if (nowMs - Network._lastFlushMs) < NOTE_FLUSH_INTERVAL_MS then
-        return
-    end
-    Network._lastFlushMs = nowMs
-    flushNoteBuffer()
+Hook.Add("think", "MidiMod.Network.Flush", function()
+    if Game.IsSingleplayer then return end
+    flushPendingNotes()
 end)
+
+-- Buff notifications (sent once on play start/stop, not spammed)
 
 function Network.notifyBuffStart(character)
     if Game.IsSingleplayer or not character then return end
     local charID = nil
     pcall(function() charID = character.ID end)
     if not charID then return end
+
     local msg = Networking.Start(NET_BUFF_START)
     msg.WriteUInt16(charID)
     Networking.Send(msg)
@@ -210,35 +202,39 @@ function Network.notifyBuffStop(character)
     local charID = nil
     pcall(function() charID = character.ID end)
     if not charID then return end
+
     local msg = Networking.Start(NET_BUFF_STOP)
     msg.WriteUInt16(charID)
     Networking.Send(msg)
 end
 
+-- High-level: load + play a MIDI file
 function Network.requestPlay(fileName, tempoMult)
     tempoMult = tempoMult or 1.0
+
     local character = Character.Controlled
     if not character or not MidiMod.IsHoldingInstrument(character) then
         MidiMod.Log("Not holding instrument!")
         return
     end
-    local charID = character.ID
-    if MidiMod.Player then
-        MidiMod.Player.stopChar(charID)
-    end
+
+    -- Stop current playback first
+    Network.requestStop()
 
     local fullPath = Network.resolveMidiPath(fileName)
-    MidiMod.Log("Loading MIDI to Stream: " .. fullPath)
-    local success = MidiMod.Player.loadFile(fullPath, character.ID)
+    MidiMod.Log("Loading MIDI: " .. fullPath)
+
+    local success = MidiMod.Player.loadFile(fullPath)
     if success then
-        MidiMod.Player.setTempo(character.ID, tempoMult)
+        MidiMod.Player.setTempo(tempoMult)
         if not Game.IsSingleplayer then
-            MidiMod.Player.setStreamingHost(character.ID, true)
+            MidiMod.Player.isStreamingHost = true
         end
         MidiMod.Player.play(character)
 
-        if not Game.IsSingleplayer and MidiMod.Network then
-            MidiMod.Network.notifyBuffStart(character)
+        -- Tell server we started playing (for buffs)
+        if not Game.IsSingleplayer then
+            Network.notifyBuffStart(character)
         end
 
         MidiMod.Log("Started streaming MIDI!")
@@ -247,26 +243,31 @@ function Network.requestPlay(fileName, tempoMult)
     end
 end
 
+-- High-level: stop playback and notify others
 function Network.requestStop(charID)
     if not charID then
         local ch = Character.Controlled
         if ch then charID = ch.ID else return end
     end
 
+    -- Stop local playback
     if MidiMod.Player then
-        MidiMod.Player.stopChar(charID)
+        MidiMod.Player.stop()
     end
 
     if Game.IsSingleplayer then return end
+
+    -- Tell server (and other clients) we stopped
+    local msg = Networking.Start(NET_STOP)
+    msg.WriteUInt16(charID)
+
     if SERVER then
         for _, c in pairs(Client.ClientList) do
-            local msg = Networking.Start(NET_STOP)
-            msg.WriteUInt16(charID)
             Networking.Send(msg, c.Connection)
         end
     else
-        local msg = Networking.Start(NET_STOP)
-        msg.WriteUInt16(charID)
         Networking.Send(msg)
     end
 end
+
+MidiMod.Log("[Network] Loaded. Direct send, per-player stop.")

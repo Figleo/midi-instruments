@@ -1,41 +1,36 @@
--- Plays note samples in 3D, caps polyphony, and dulls sound through walls or closed doors.
+-- Sound Engine: Positional audio + Voice Stealing + Volume control
+-- No muffle system — clean and lightweight.
 
-MidiMod                       = MidiMod or {}
-MidiMod.SoundEngine           = {}
+MidiMod = MidiMod or {}
+MidiMod.SoundEngine = {}
 
-local SoundEngine             = MidiMod.SoundEngine
+local SoundEngine = MidiMod.SoundEngine
 
-local NOTE_NAMES              = {
+local NOTE_NAMES = {
     "C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"
 }
 
-local SAMPLE_MIN              = 24
-local SAMPLE_MAX              = 107
-local MAX_POLYPHONY           = 16
-local MAX_PER_SAMPLE          = 4
-local POOL_SIZE               = 2
-local MAX_NEW_PER_FRAME       = 12
-local LOAD_PER_FRAME          = 8
-local SOUND_RANGE             = 1000.0
-local SOUND_NEAR              = 35.0
+local SAMPLE_MIN        = 24
+local SAMPLE_MAX        = 107
+local MAX_POLYPHONY     = 16
+local MAX_PER_SAMPLE    = 4
+local POOL_SIZE         = 2
+local MAX_NEW_PER_FRAME = 12
+local LOAD_PER_FRAME    = 8
+local SOUND_RANGE       = 1000.0
+local SOUND_NEAR        = 35.0
 
-local FREQ_MIN                = 0.25
-local FREQ_MAX                = 4.0
+local FREQ_MIN = 0.25
+local FREQ_MAX = 4.0
 
-local MUFFLE_GAIN             = 0.15 -- Volume when a solid wall is between listener and source.
-local MUFFLE_DOOR_GAIN        = 0.55 -- Open door between rooms.
-local MUFFLE_CHECK_MS         = 100  -- Cheap enough to skip most frames.
+-- stopAll re-entry and debounce guards
+local _isStopping          = false
+local _lastStopAllTime     = 0
+local STOP_ALL_DEBOUNCE_MS = 50
 
--- trying to fiure out not to make a mess with fast midi
-local MAX_SAME_NOTE           = 1
-
--- stopAll can recurse from Dispose callbacks; guard that.
-local _isStopping             = false
-local _lastStopAllTime        = 0
-local STOP_ALL_DEBOUNCE_MS    = 50
-
-local _lastCleanupTime        = 0
-local CLEANUP_THROTTLE_MS     = 30
+-- cleanupDead throttle
+local _lastCleanupTime    = 0
+local CLEANUP_THROTTLE_MS = 30
 
 SoundEngine.soundBanks        = {}
 SoundEngine.soundBankIdx      = {}
@@ -44,18 +39,14 @@ SoundEngine.noteQueue         = {}
 SoundEngine.protectedChannels = {}
 SoundEngine.notesThisFrame    = 0
 SoundEngine.initialized       = false
-SoundEngine.volumeMultiplier  = 1.0
 
-local _loadQueue              = nil
-local _loadDone               = false
-local _loadSamplesLoaded      = 0
-local _loadObjectsLoaded      = 0
+-- Chunked loading state
+local _loadQueue         = nil
+local _loadDone          = false
+local _loadSamplesLoaded = 0
+local _loadObjectsLoaded = 0
 
-local _wallCheckAvailable     = nil
-local _gapIterMethod          = nil
-local _lastMuffleCheck        = 0
-local _muffleLogCount         = 0
-local _weAreSettingPitch      = false
+local _weAreSettingPitch = false
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -63,7 +54,7 @@ local function noteToName(midiNote)
     return NOTE_NAMES[noteIndex] .. octave
 end
 
--- Kick off background loading; the think hook drains a few files per frame.
+-- Begin chunked loading — call once, then pump via think hook
 function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
 
@@ -74,7 +65,7 @@ function SoundEngine.init()
         SoundEngine.soundBanks[inst]   = {}
         SoundEngine.soundBankIdx[inst] = {}
 
-        local soundDir                 = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
+        local soundDir = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
         for noteNum = SAMPLE_MIN, SAMPLE_MAX do
             local name = noteToName(noteNum)
             local path = soundDir .. inst .. "_" .. name .. ".ogg"
@@ -86,6 +77,7 @@ function SoundEngine.init()
         #_loadQueue, #instruments))
 end
 
+-- Process up to LOAD_PER_FRAME jobs per frame
 local function pumpLoadQueue()
     if _loadQueue == nil or _loadDone then return end
 
@@ -100,9 +92,7 @@ local function pumpLoadQueue()
                 fileExists = File.Exists(job.path)
             else
                 local f = io.open(job.path, "r")
-                if f then
-                    f:close(); fileExists = true
-                end
+                if f then f:close(); fileExists = true end
             end
         end)
 
@@ -120,8 +110,8 @@ local function pumpLoadQueue()
                 end
                 SoundEngine.soundBanks[job.inst][job.noteNum]   = pool
                 SoundEngine.soundBankIdx[job.inst][job.noteNum] = 0
-                _loadSamplesLoaded                              = _loadSamplesLoaded + 1
-                _loadObjectsLoaded                              = _loadObjectsLoaded + #pool
+                _loadSamplesLoaded = _loadSamplesLoaded + 1
+                _loadObjectsLoaded = _loadObjectsLoaded + #pool
             end
         end
     end
@@ -146,7 +136,6 @@ local function getNextSound(inst, noteNum)
     return pool[idx]
 end
 
--- Nearest recorded note plus pitch multiplier when we lack an exact sample.
 local function findClosestSample(midiNote, bank)
     if bank[midiNote] then return midiNote, 1.0 end
 
@@ -167,6 +156,8 @@ local function findClosestSample(midiNote, bank)
     end
     return nil, 1.0
 end
+
+-- Channel lifecycle helpers
 
 local function safeAlive(ch)
     if not ch then return false end
@@ -200,14 +191,12 @@ local function disposeChannel(idx)
     removeChannelAt(idx, false)
 end
 
-local function voiceSteal(sampleNote, instrument, charID)
+local function voiceSteal(sampleNote, instrument)
     local count = 0
     local oldestIdx = nil
 
     for i, info in ipairs(SoundEngine.activeChannels) do
-        if info.sampleNote == sampleNote
-            and info.instrument == instrument
-            and info.charID == charID then
+        if info.sampleNote == sampleNote and info.instrument == instrument then
             count = count + 1
             if not oldestIdx then oldestIdx = i end
         end
@@ -230,185 +219,13 @@ local function cleanupDead()
     end
 end
 
-local function evictOldestForChar(charID)
-    for i, info in ipairs(SoundEngine.activeChannels) do
-        if info.charID == charID then
-            fadeDisposeChannel(i)
-            return
-        end
+local function evictOldest()
+    if #SoundEngine.activeChannels > 0 then
+        fadeDisposeChannel(1)
     end
 end
 
-local function countChannelsForChar(charID)
-    local n = 0
-    for _, info in ipairs(SoundEngine.activeChannels) do
-        if info.charID == charID then n = n + 1 end
-    end
-    return n
-end
-
-local function getHullGaps(hull)
-    local gaps = {}
-    if not hull then return gaps end
-
-    if _gapIterMethod == nil or _gapIterMethod == "enum" then
-        local ok = pcall(function()
-            for gap in hull.ConnectedGaps do
-                table.insert(gaps, gap)
-            end
-        end)
-        if ok and #gaps > 0 then
-            if _gapIterMethod == nil then
-                _gapIterMethod = "enum"
-                MidiMod.Log("[Muffle] Gap iteration method: enum (for...in)")
-            end
-            return gaps
-        end
-    end
-
-    if _gapIterMethod == nil or _gapIterMethod == "count" then
-        local ok = pcall(function()
-            local cg = hull.ConnectedGaps
-            if cg and cg.Count then
-                for i = 0, cg.Count - 1 do
-                    table.insert(gaps, cg[i])
-                end
-            end
-        end)
-        if ok and #gaps > 0 then
-            if _gapIterMethod == nil then
-                _gapIterMethod = "count"
-                MidiMod.Log("[Muffle] Gap iteration method: count (indexed)")
-            end
-            return gaps
-        end
-    end
-
-    if _gapIterMethod == nil then
-        local ok = pcall(function()
-            local cg = hull.ConnectedGaps
-            if cg and cg.Length then
-                for i = 0, cg.Length - 1 do
-                    table.insert(gaps, cg[i])
-                end
-            end
-        end)
-        if ok and #gaps > 0 then
-            _gapIterMethod = "count"
-            MidiMod.Log("[Muffle] Gap iteration method: Length (indexed)")
-            return gaps
-        end
-    end
-
-    if _gapIterMethod == nil then
-        _gapIterMethod = false
-        MidiMod.Log("[Muffle] WARNING: Cannot iterate hull.ConnectedGaps; door detection disabled")
-    end
-
-    return gaps
-end
-
-local function gapConnectsTo(gap, targetHull)
-    local connects = false
-
-    pcall(function()
-        for entity in gap.linkedTo do
-            if entity == targetHull then
-                connects = true
-            end
-        end
-    end)
-    if connects then return true end
-
-    pcall(function()
-        local l0 = gap.linkedTo[0]
-        local l1 = gap.linkedTo[1]
-        if l0 == targetHull or l1 == targetHull then
-            connects = true
-        end
-    end)
-    if connects then return true end
-
-    pcall(function()
-        local l1 = gap.linkedTo[1]
-        local l2 = gap.linkedTo[2]
-        if l1 == targetHull or l2 == targetHull then
-            connects = true
-        end
-    end)
-
-    return connects
-end
-
--- Returns none (same space), open (door between hulls), or wall (blocked).
-local function checkWallStatus(sourceWorldPos)
-    if _wallCheckAvailable == false then return "none" end
-    if not sourceWorldPos then return "none" end
-
-    local listener = nil
-    pcall(function() listener = Character.Controlled end)
-    if not listener then return "none" end
-
-    local listenerPos = nil
-    pcall(function() listenerPos = listener.WorldPosition end)
-    if not listenerPos then return "none" end
-
-    local sourceHull = nil
-    local listenerHull = nil
-
-    local ok1 = pcall(function()
-        sourceHull = Hull.FindHull(Vector2(sourceWorldPos.X, sourceWorldPos.Y))
-    end)
-
-    if not ok1 then
-        if _wallCheckAvailable == nil then
-            _wallCheckAvailable = false
-            MidiMod.Log("[Muffle] Hull.FindHull NOT available; wall muffle disabled")
-        end
-        return "none"
-    end
-
-    if _wallCheckAvailable == nil then
-        _wallCheckAvailable = true
-        MidiMod.Log("[Muffle] Hull.FindHull available; wall muffle enabled.")
-    end
-
-    pcall(function()
-        listenerHull = Hull.FindHull(Vector2(listenerPos.X, listenerPos.Y))
-    end)
-
-    if sourceHull == listenerHull then return "none" end
-
-    if not sourceHull and not listenerHull then return "none" end
-
-    if not sourceHull or not listenerHull then return "wall" end
-
-    if _gapIterMethod ~= false then
-        local gaps = getHullGaps(sourceHull)
-
-        for _, gap in ipairs(gaps) do
-            if gapConnectsTo(gap, listenerHull) then
-                local openAmount = 0
-                pcall(function() openAmount = gap.Open end)
-
-                if openAmount > 0.1 then
-                    if _muffleLogCount < 3 then
-                        _muffleLogCount = _muffleLogCount + 1
-                        MidiMod.Log("[Muffle] Open door detected (open=" ..
-                            string.format("%.2f", openAmount) .. ")")
-                    end
-                    return "open"
-                end
-            end
-        end
-    end
-
-    if _muffleLogCount < 3 then
-        _muffleLogCount = _muffleLogCount + 1
-        MidiMod.Log("[Muffle] Wall/closed door detected between hulls")
-    end
-    return "wall"
-end
+-- Play Note (charID is optional, used for per-player stop)
 
 local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local bank = SoundEngine.soundBanks[instrument]
@@ -422,7 +239,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
 
     local finalFreq = math.max(FREQ_MIN, math.min(FREQ_MAX, freqMult))
 
-    -- Skip notes that would need an extreme retune (avoids bad edge cases).
+    -- Skip notes that would need extreme retuning
     if freqMult < FREQ_MIN or freqMult > FREQ_MAX then
         if math.abs(freqMult - finalFreq) > 0.05 then
             return nil
@@ -430,68 +247,42 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     end
 
     cleanupDead()
-    local sameNoteCount = 0
-    local oldestSameNoteIdx = nil
-
-    for i, info in ipairs(SoundEngine.activeChannels) do
-        if info.note == midiNote and info.instrument == instrument then
-            sameNoteCount = sameNoteCount + 1
-            if not oldestSameNoteIdx then
-                oldestSameNoteIdx = i
-            end
-        end
-    end
-
-    if sameNoteCount >= MAX_SAME_NOTE and oldestSameNoteIdx then
-        fadeDisposeChannel(oldestSameNoteIdx)
-    end
-
-    voiceSteal(sampleNote, instrument, charID)
-    while countChannelsForChar(charID) >= MAX_POLYPHONY do
-        evictOldestForChar(charID)
-    end
+    voiceSteal(sampleNote, instrument)
+    while #SoundEngine.activeChannels >= MAX_POLYPHONY do evictOldest() end
 
     local sound = getNextSound(instrument, sampleNote)
     if not sound then return nil end
 
-    local rawGain    = math.min(1.0, (velocity / 127))
-    local volumeMult = MidiMod.CurrentVolume or SoundEngine.volumeMultiplier or 1.0
-    local baseGain   = rawGain * volumeMult
-
-    local wallStatus = checkWallStatus(worldPos)
-    local playGain   = baseGain
-    if wallStatus == "wall" then
-        playGain = baseGain * MUFFLE_GAIN
-    elseif wallStatus == "open" then
-        playGain = baseGain * MUFFLE_DOOR_GAIN
-    end
+    -- Volume: velocity scaled by user volume setting
+    local volumeMult = MidiMod.CurrentVolume or 1.0
+    local baseGain = math.min(1.0, (velocity / 127)) * volumeMult
 
     local channel = nil
 
     if worldPos then
         local ok, ch = pcall(function()
-            return sound.Play(playGain, SOUND_RANGE, Vector2(worldPos.X, worldPos.Y))
+            return sound.Play(baseGain, SOUND_RANGE, Vector2(worldPos.X, worldPos.Y))
         end)
         if ok and ch then channel = ch end
     end
 
     if not channel then
         local ok, ch = pcall(function()
-            return sound.Play(playGain, SOUND_RANGE)
+            return sound.Play(baseGain, SOUND_RANGE)
         end)
         if ok and ch then channel = ch end
     end
 
     if not channel then return nil end
 
+    -- Register for pitch protection
     SoundEngine.protectedChannels[channel] = finalFreq
 
-    MidiMod.Log(string.format("[PitchLog] Note: %d (%s) | Inst: %s | Sample: %d | Mult: %.4f",
-        midiNote, noteToName(midiNote), instrument, sampleNote, finalFreq))
-
+    -- Set pitch
     _weAreSettingPitch = true
     pcall(function() channel.FrequencyMultiplier = finalFreq end)
     _weAreSettingPitch = false
+
     if worldPos then
         pcall(function() channel.Near = SOUND_NEAR end)
         pcall(function() channel.Far = SOUND_RANGE end)
@@ -504,11 +295,8 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         sampleNote = sampleNote,
         instrument = instrument,
         freqMult   = finalFreq,
-        rawGain    = rawGain,
         baseGain   = baseGain,
         worldPos   = worldPos,
-        wallStatus = wallStatus,
-        playTime   = os.clock(),
         charID     = charID
     })
 
@@ -519,6 +307,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     if not SoundEngine.initialized then SoundEngine.init() end
     instrument = instrument or "accordion"
 
+    -- Deduplicate: if same note already queued, just keep highest velocity
     for _, queued in ipairs(SoundEngine.noteQueue) do
         if queued.midiNote == midiNote and queued.instrument == instrument then
             queued.velocity = math.max(queued.velocity, velocity)
@@ -543,6 +332,8 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     return nil
 end
 
+-- Think Hook: cleanup + pitch protection + queue drain
+
 Hook.Add("think", "midi_sound_tick", function()
     if not CLIENT then return end
 
@@ -550,38 +341,16 @@ Hook.Add("think", "midi_sound_tick", function()
 
     SoundEngine.notesThisFrame = 0
 
-    local now = os.clock() * 1000
-
     cleanupDead()
 
-    if _wallCheckAvailable ~= false and (now - _lastMuffleCheck) > MUFFLE_CHECK_MS then
-        _lastMuffleCheck = now
-
-        for _, info in ipairs(SoundEngine.activeChannels) do
-            local newStatus = checkWallStatus(info.worldPos)
-
-            if newStatus ~= info.wallStatus then
-                info.wallStatus = newStatus
-
-                local effGain = info.rawGain * (MidiMod.CurrentVolume or SoundEngine.volumeMultiplier)
-                local newGain = effGain
-                if newStatus == "wall" then
-                    newGain = effGain * MUFFLE_GAIN
-                elseif newStatus == "open" then
-                    newGain = effGain * MUFFLE_DOOR_GAIN
-                end
-
-                pcall(function() info.channel.Gain = newGain end)
-            end
-        end
-    end
-
+    -- Re-apply pitch every frame (protects against SPW and other mods)
     for _, info in ipairs(SoundEngine.activeChannels) do
         _weAreSettingPitch = true
         pcall(function() info.channel.FrequencyMultiplier = info.freqMult end)
         _weAreSettingPitch = false
     end
 
+    -- Drain note queue
     local played = 0
     while #SoundEngine.noteQueue > 0 and played < MAX_NEW_PER_FRAME do
         local entry = table.remove(SoundEngine.noteQueue, 1)
@@ -589,31 +358,18 @@ Hook.Add("think", "midi_sound_tick", function()
         played = played + 1
     end
 
+    -- Cap queue size to prevent unbounded growth
     while #SoundEngine.noteQueue > 48 do
         table.remove(SoundEngine.noteQueue, 1)
     end
 end)
 
--- SPW патч: защищаем FrequencyMultiplier от перезаписи.
--- Только на клиенте — Barotrauma.Sounds.SoundChannel не существует на сервере.
-if CLIENT then
-    Hook.Patch(
-        "Barotrauma.Sounds.SoundChannel",
-        "set_FrequencyMultiplier",
-        function(instance, ptable)
-            if _weAreSettingPitch then return end
-            if not instance then return end
+-- NOTE: No Hook.Patch on set_FrequencyMultiplier here.
+-- The per-frame re-apply in the think hook above is sufficient to protect our pitch.
+-- A Hook.Patch would intercept EVERY sound channel in the game (including SPW's),
+-- creating massive performance overhead and causing client freezes.
 
-            local desired = SoundEngine.protectedChannels[instance]
-            if not desired then return end
-            _weAreSettingPitch = true
-            pcall(function() instance.FrequencyMultiplier = desired end)
-            _weAreSettingPitch = false
-        end,
-        Hook.HookMethodType.After
-    )
-end
-
+-- Stop a specific note
 function SoundEngine.stopNote(midiNote)
     for i = #SoundEngine.noteQueue, 1, -1 do
         if SoundEngine.noteQueue[i].midiNote == midiNote then
@@ -628,6 +384,7 @@ function SoundEngine.stopNote(midiNote)
     end
 end
 
+-- Stop all sounds globally
 function SoundEngine.stopAll()
     if _isStopping then return end
 
@@ -644,6 +401,7 @@ function SoundEngine.stopAll()
     _isStopping = false
 end
 
+-- Stop all sounds for a specific character (per-player stop for multiplayer)
 function SoundEngine.stopAllForChar(charID)
     if not charID then return end
 
@@ -660,22 +418,4 @@ function SoundEngine.stopAllForChar(charID)
     end
 end
 
--- Apply master volume to every live channel right away.
-function SoundEngine.setVolume(v)
-    v = math.max(0.0, math.min(1.0, v))
-    SoundEngine.volumeMultiplier = v
-
-    for _, info in ipairs(SoundEngine.activeChannels) do
-        local effGain = (info.rawGain or info.baseGain) * v
-        local newGain = effGain
-        if info.wallStatus == "wall" then
-            newGain = effGain * MUFFLE_GAIN
-        elseif info.wallStatus == "open" then
-            newGain = effGain * MUFFLE_DOOR_GAIN
-        end
-
-        pcall(function() info.channel.Gain = newGain end)
-    end
-end
-
-MidiMod.Log("[SoundEngine] Pitch protection via per-frame re-apply")
+MidiMod.Log("[SoundEngine] Loaded. Pitch protection via per-frame re-apply.")
