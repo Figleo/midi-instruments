@@ -1,36 +1,36 @@
 -- Sound Engine: Positional audio + Voice Stealing + Volume control
 -- No muffle system — clean and lightweight.
 
-MidiMod = MidiMod or {}
-MidiMod.SoundEngine = {}
+MidiMod                       = MidiMod or {}
+MidiMod.SoundEngine           = {}
 
-local SoundEngine = MidiMod.SoundEngine
+local SoundEngine             = MidiMod.SoundEngine
 
-local NOTE_NAMES = {
+local NOTE_NAMES              = {
     "C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"
 }
 
-local SAMPLE_MIN        = 24
-local SAMPLE_MAX        = 107
-local MAX_POLYPHONY     = 16
-local MAX_PER_SAMPLE    = 4
-local POOL_SIZE         = 2
-local MAX_NEW_PER_FRAME = 12
-local LOAD_PER_FRAME    = 8
-local SOUND_RANGE       = 1000.0
-local SOUND_NEAR        = 35.0
+local SAMPLE_MIN              = 24
+local SAMPLE_MAX              = 107
+local MAX_POLYPHONY           = 16
+local MAX_PER_SAMPLE          = 4
+local POOL_SIZE               = 2
+local MAX_NEW_PER_FRAME       = 12
+local LOAD_PER_FRAME          = 8
+local SOUND_RANGE             = 1000.0
+local SOUND_NEAR              = 35.0
 
-local FREQ_MIN = 0.25
-local FREQ_MAX = 4.0
+local FREQ_MIN                = 0.25
+local FREQ_MAX                = 4.0
 
 -- stopAll re-entry and debounce guards
-local _isStopping          = false
-local _lastStopAllTime     = 0
-local STOP_ALL_DEBOUNCE_MS = 50
+local _isStopping             = false
+local _lastStopAllTime        = 0
+local STOP_ALL_DEBOUNCE_MS    = 50
 
 -- cleanupDead throttle
-local _lastCleanupTime    = 0
-local CLEANUP_THROTTLE_MS = 30
+local _lastCleanupTime        = 0
+local CLEANUP_THROTTLE_MS     = 30
 
 SoundEngine.soundBanks        = {}
 SoundEngine.soundBankIdx      = {}
@@ -41,12 +41,12 @@ SoundEngine.notesThisFrame    = 0
 SoundEngine.initialized       = false
 
 -- Chunked loading state
-local _loadQueue         = nil
-local _loadDone          = false
-local _loadSamplesLoaded = 0
-local _loadObjectsLoaded = 0
+local _loadQueue              = nil
+local _loadDone               = false
+local _loadSamplesLoaded      = 0
+local _loadObjectsLoaded      = 0
 
-local _weAreSettingPitch = false
+local _weAreSettingPitch      = false
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -65,7 +65,7 @@ function SoundEngine.init()
         SoundEngine.soundBanks[inst]   = {}
         SoundEngine.soundBankIdx[inst] = {}
 
-        local soundDir = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
+        local soundDir                 = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
         for noteNum = SAMPLE_MIN, SAMPLE_MAX do
             local name = noteToName(noteNum)
             local path = soundDir .. inst .. "_" .. name .. ".ogg"
@@ -92,7 +92,9 @@ local function pumpLoadQueue()
                 fileExists = File.Exists(job.path)
             else
                 local f = io.open(job.path, "r")
-                if f then f:close(); fileExists = true end
+                if f then
+                    f:close(); fileExists = true
+                end
             end
         end)
 
@@ -110,8 +112,8 @@ local function pumpLoadQueue()
                 end
                 SoundEngine.soundBanks[job.inst][job.noteNum]   = pool
                 SoundEngine.soundBankIdx[job.inst][job.noteNum] = 0
-                _loadSamplesLoaded = _loadSamplesLoaded + 1
-                _loadObjectsLoaded = _loadObjectsLoaded + #pool
+                _loadSamplesLoaded                              = _loadSamplesLoaded + 1
+                _loadObjectsLoaded                              = _loadObjectsLoaded + #pool
             end
         end
     end
@@ -364,10 +366,37 @@ Hook.Add("think", "midi_sound_tick", function()
     end
 end)
 
--- NOTE: No Hook.Patch on set_FrequencyMultiplier here.
--- The per-frame re-apply in the think hook above is sufficient to protect our pitch.
--- A Hook.Patch would intercept EVERY sound channel in the game (including SPW's),
--- creating massive performance overhead and causing client freezes.
+-- Protect our channels from external pitch modification (SPW / Soundproof Walls compatibility).
+-- Prefix on set_FrequencyMultiplier: if an external caller (SPW, other mods) tries to change
+-- pitch on one of our channels, we block it. Our own code uses _weAreSettingPitch flag to bypass.
+-- The check is O(1) — a single boolean + hash-table lookup — so overhead is negligible.
+local _pitchPatchOk = false
+
+local function pitchGuardPrefix(instance, ptable)
+    if _weAreSettingPitch then return end
+    if SoundEngine.protectedChannels[instance] then
+        ptable.PreventExecution = true
+    end
+end
+
+-- Try canonical namespace first, fall back to alternative
+for _, className in ipairs({
+    "Barotrauma.Sounds.SoundChannel",
+    "Barotrauma.SoundChannel",
+    "SoundChannel",
+}) do
+    if _pitchPatchOk then break end
+    pcall(function()
+        Hook.Patch(className, "set_FrequencyMultiplier",
+            pitchGuardPrefix, Hook.HookMethodType.Before)
+        _pitchPatchOk = true
+        MidiMod.Log("[SoundEngine] Pitch guard patched on " .. className)
+    end)
+end
+
+if not _pitchPatchOk then
+    MidiMod.Log("[SoundEngine] WARNING: Pitch guard patch failed. Relying on per-frame re-apply only.")
+end
 
 -- Stop a specific note
 function SoundEngine.stopNote(midiNote)
