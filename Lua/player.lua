@@ -18,6 +18,7 @@ Player.currentFile         = nil
 Player.sourceCharacter     = nil
 Player.onStateChange       = nil
 Player.isStreamingHost     = false
+Player.instrumentDropped   = false
 Player.streamingCharacters = {} -- tracks remote players streaming to us
 
 -- MIDI Loading
@@ -109,6 +110,7 @@ function Player.stop()
     Player.cursor = 1
     Player.sourceCharacter = nil
     Player.isStreamingHost = false
+    Player.instrumentDropped = false
 
     if MidiMod.SoundEngine then
         pcall(MidiMod.SoundEngine.stopAll)
@@ -322,14 +324,18 @@ Hook.Add("think", "MidiMod.Player.Think", function()
 
     -- Stop if instrument was dropped
     if not MidiMod.IsHoldingInstrument(ch) then
-        MidiMod.Log("Instrument dropped — stopping playback")
-        if MidiMod.Network then
-            pcall(MidiMod.Network.requestStop)
-        else
-            Player.stop()
+        if not Player.instrumentDropped then
+            Player.instrumentDropped = true
+            MidiMod.Log("Instrument dropped — stopping playback")
+            if MidiMod.Network then
+                pcall(MidiMod.Network.requestStop)
+            else
+                Player.stop()
+            end
         end
         return
     end
+    Player.instrumentDropped = false
 
     onThink()
 end)
