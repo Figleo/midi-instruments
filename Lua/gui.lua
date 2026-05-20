@@ -2,22 +2,19 @@
 
 if not CLIENT then return end
 
-MidiMod = MidiMod or {}
-MidiMod.GUI = {}
+MidiMod                    = MidiMod or {}
+MidiMod.GUI                = {}
 
-local MGUI = MidiMod.GUI
+local MGUI                 = MidiMod.GUI
 
-MGUI.panel = nil
-MGUI.isOpen = false
-MGUI.midiFiles = {}
-MGUI.selectedFile = nil
-MGUI.fileIndex = 1
-MGUI.tempoValue = 1.0
+MGUI.panel                 = nil
+MGUI.isOpen                = false
+MGUI.midiFiles             = {}
+MGUI.selectedFile          = nil
+MGUI.tempoValue            = 1.0
 
--- Did we have an instrument equipped last frame? Used for auto open/close.
 local wasHoldingInstrument = false
 
--- Refresh the list of .mid files from disk.
 local function refreshFileList()
     MGUI.midiFiles = {}
     if MidiMod.MidiParser then
@@ -32,29 +29,75 @@ local function getFileName(path)
     return string.match(path, "([^/\\]+)$") or path
 end
 
--- UI widgets
-local frame = nil      -- Full-screen invisible layer so the panel can sit on top.
-local panelFrame = nil -- The visible box you drag around.
-local titleText = nil
-local fileLabel = nil
-local statusLabel = nil
+-- ── UI state ──────────────────────────────────────────────────────────────────
+local frame                  = nil
+local panelFrame             = nil
+local statusLabel            = nil
+local fileListBox            = nil
+local searchBox              = nil
 
--- Keeps the panel where you left it when Prev/Next rebuilds the UI.
+local lastSearch             = ""
 local savedPanelScreenOffset = nil
 
+-- ── File list builder ─────────────────────────────────────────────────────────
+local function rebuildFileList(searchText)
+    if not fileListBox then return end
+
+    pcall(function() fileListBox.ClearChildren() end)
+
+    local lower = string.lower(searchText or "")
+
+    for _, path in ipairs(MGUI.midiFiles) do
+        local name  = getFileName(path)
+        local match = (lower == "") or
+            (string.find(string.lower(name), lower, 1, true) ~= nil)
+
+        if match then
+            local isSelected = (MGUI.selectedFile == path)
+
+            local btn = GUI.Button(
+                GUI.RectTransform(Vector2(1, 0), fileListBox.Content.RectTransform, GUI.Anchor.TopCenter, nil,
+                    Point(0, 28)),
+                " " .. name,
+                GUI.Alignment.CenterLeft,
+                "ListBoxElement"
+            )
+            btn.CanBeFocused = true
+
+            if isSelected then
+                btn.Color = Color(40, 80, 160, 210)
+            end
+            btn.HoverColor = Color(60, 110, 200, 220)
+
+            pcall(function()
+                local tb = btn.GetChild(0)
+                if tb then
+                    tb.TextColor      = isSelected and Color(100, 200, 255) or Color(210, 210, 210)
+                    tb.HoverTextColor = Color(255, 255, 255)
+                end
+            end)
+
+            local capturedPath = path
+            btn.OnClicked = function()
+                MGUI.selectedFile = capturedPath
+                return true
+            end
+        end
+    end
+end
+
+-- ── Panel lifecycle ───────────────────────────────────────────────────────────
 local function destroyPanel()
     if frame then
         pcall(function() frame.Visible = false end)
-        pcall(function()
-            frame.RectTransform.Parent = nil
-        end)
+        pcall(function() frame.RectTransform.Parent = nil end)
     end
-    frame = nil
-    panelFrame = nil
-    titleText = nil
-    fileLabel = nil
+    frame       = nil
+    panelFrame  = nil
     statusLabel = nil
-    MGUI.panel = nil
+    fileListBox = nil
+    searchBox   = nil
+    MGUI.panel  = nil
     MGUI.isOpen = false
 end
 
@@ -67,27 +110,28 @@ local function createPanel()
     destroyPanel()
     refreshFileList()
 
+    -- ── Root overlay ──────────────────────────────────────────────────────────
     frame = GUI.Frame(GUI.RectTransform(Vector2(1, 1)), nil)
     frame.CanBeFocused = false
 
-    -- Small window bottom-right with a fixed pixel size.
-    local panelW = 350
-    local panelH = 300
+    -- ── Main window ───────────────────────────────────────────────────────────
+    local panelW, panelH = 360, 440
     panelFrame = GUI.Frame(
         GUI.RectTransform(Point(panelW, panelH), frame.RectTransform, GUI.Anchor.BottomRight),
         "GUIFrameListBox"
     )
     panelFrame.RectTransform.AbsoluteOffset = Point(20, 120)
     panelFrame.CanBeFocused = true
+
     if savedPanelScreenOffset then
         pcall(function()
             panelFrame.RectTransform.ScreenSpaceOffset = savedPanelScreenOffset
         end)
     end
 
-    -- Drag handle for the title strip
+    -- ── Title / drag handle ───────────────────────────────────────────────────
     local titleDrag = GUI.DragHandle(
-        GUI.RectTransform(Vector2(1, 0.14), panelFrame.RectTransform, GUI.Anchor.TopCenter),
+        GUI.RectTransform(Vector2(1, 0.10), panelFrame.RectTransform, GUI.Anchor.TopCenter),
         panelFrame.RectTransform,
         nil
     )
@@ -96,175 +140,207 @@ local function createPanel()
         titleDrag.DragArea = Rectangle(0, 0, GameMain.GraphicsWidth, GameMain.GraphicsHeight)
     end)
 
-    local dragIndicator = GUI.Frame(
-        GUI.RectTransform(Vector2(0.10, 0.75), titleDrag.RectTransform, GUI.Anchor.CenterLeft),
+    GUI.Frame(
+        GUI.RectTransform(Vector2(0.08, 0.70), titleDrag.RectTransform, GUI.Anchor.CenterLeft),
         "GUIDragIndicator"
-    )
-    dragIndicator.CanBeFocused = false
+    ).CanBeFocused = false
 
-    titleText = GUI.TextBlock(
+    local titleText = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 1), titleDrag.RectTransform),
         "♪ MIDI Player",
         nil, nil, GUI.Alignment.Center
     )
     titleText.TextColor = Color(120, 200, 255)
 
+    -- ── Outer content list ────────────────────────────────────────────────────
     local contentList = GUI.ListBox(
-        GUI.RectTransform(Vector2(0.92, 0.82), panelFrame.RectTransform, GUI.Anchor.BottomCenter)
+        GUI.RectTransform(Vector2(0.93, 0.88), panelFrame.RectTransform, GUI.Anchor.BottomCenter)
     )
-    contentList.RectTransform.AbsoluteOffset = Point(0, 4)
+    contentList.RectTransform.AbsoluteOffset = Point(0, 6)
 
+    -- ── No-files fallback ─────────────────────────────────────────────────────
     if #MGUI.midiFiles == 0 then
-        fileLabel = GUI.TextBlock(
-            GUI.RectTransform(Vector2(1, 0.25), contentList.Content.RectTransform),
+        local noFiles     = GUI.TextBlock(
+            GUI.RectTransform(Vector2(1, 0.20), contentList.Content.RectTransform),
             "No MIDI files found!\nInstall 'MIDI Storage' from Workshop",
             nil, nil, GUI.Alignment.Center
         )
-        fileLabel.TextColor = Color(255, 100, 100)
-        fileLabel.Wrap = true
-
-        MGUI.panel = frame
-        MGUI.isOpen = true
+        noFiles.TextColor = Color(255, 100, 100)
+        noFiles.Wrap      = true
+        MGUI.panel        = frame
+        MGUI.isOpen       = true
         return
     end
 
-    if MGUI.fileIndex < 1 then MGUI.fileIndex = 1 end
-    if MGUI.fileIndex > #MGUI.midiFiles then MGUI.fileIndex = #MGUI.midiFiles end
+    if not MGUI.selectedFile then
+        MGUI.selectedFile = MGUI.midiFiles[1]
+    end
 
-    MGUI.selectedFile = MGUI.midiFiles[MGUI.fileIndex]
-    local fileName = getFileName(MGUI.selectedFile)
-
-    fileLabel = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.25), contentList.Content.RectTransform),
-        string.format("[%d/%d] %s", MGUI.fileIndex, #MGUI.midiFiles, fileName),
-        nil, nil, GUI.Alignment.Center
+    -- ── Search label ──────────────────────────────────────────────────────────
+    local searchLabel       = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
+        "Search:",
+        nil, nil, GUI.Alignment.CenterLeft
     )
-    fileLabel.Wrap = true
-    fileLabel.TextColor = Color(220, 220, 220)
+    searchLabel.TextColor   = Color(160, 160, 160)
+    searchLabel.Padding     = Vector4(4, 0, 0, 0)
 
-    local navRow = GUI.Frame(
-        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform),
+    -- ── Search row: [TextBox.......] [↺] ─────────────────────────────────────
+    local searchRow         = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.09), contentList.Content.RectTransform),
         nil
     )
-    navRow.CanBeFocused = false
+    searchRow.CanBeFocused  = false
 
-    local prevBtn = GUI.Button(
-        GUI.RectTransform(Vector2(0.48, 1), navRow.RectTransform, GUI.Anchor.CenterLeft),
-        "◄ Prev", GUI.Alignment.Center, "GUIButtonSmall"
+    searchBox               = GUI.TextBox(
+        GUI.RectTransform(Vector2(0.76, 1), searchRow.RectTransform, GUI.Anchor.CenterLeft),
+        lastSearch
     )
-    prevBtn.OnClicked = function()
-        MGUI.fileIndex = MGUI.fileIndex - 1
-        if MGUI.fileIndex < 1 then MGUI.fileIndex = #MGUI.midiFiles end
-        createPanel()
+    searchBox.MaxTextLength = 80
+    lastSearch              = searchBox.Text or ""
+
+    -- Refresh button: rescans files from disk AND applies current search filter.
+    local refreshBtn        = GUI.Button(
+        GUI.RectTransform(Vector2(0.22, 1), searchRow.RectTransform, GUI.Anchor.CenterRight),
+        "↺ Refresh", GUI.Alignment.Center, "GUIButtonSmall"
+    )
+    refreshBtn.OnClicked    = function()
+        refreshFileList()
+        local stillExists = false
+        for _, p in ipairs(MGUI.midiFiles) do
+            if p == MGUI.selectedFile then
+                stillExists = true; break
+            end
+        end
+        if not stillExists then MGUI.selectedFile = MGUI.midiFiles[1] end
+        rebuildFileList(lastSearch)
         return true
     end
 
-    local nextBtn = GUI.Button(
-        GUI.RectTransform(Vector2(0.48, 1), navRow.RectTransform, GUI.Anchor.CenterRight),
-        "Next ►", GUI.Alignment.Center, "GUIButtonSmall"
+    -- ── Scrollable file list ──────────────────────────────────────────────────
+    fileListBox             = GUI.ListBox(
+        GUI.RectTransform(Vector2(1, 0.48), contentList.Content.RectTransform)
     )
-    nextBtn.OnClicked = function()
-        MGUI.fileIndex = MGUI.fileIndex + 1
-        if MGUI.fileIndex > #MGUI.midiFiles then MGUI.fileIndex = 1 end
-        createPanel()
-        return true
-    end
 
-    local actionRow = GUI.Frame(
-        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform),
+    rebuildFileList(lastSearch)
+
+    -- ── Divider ───────────────────────────────────────────────────────────────
+    local divider             = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.01), contentList.Content.RectTransform),
+        "HorizontalLine"
+    )
+    divider.CanBeFocused      = false
+
+    -- ── Play / Stop ───────────────────────────────────────────────────────────
+    local actionRow           = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.11), contentList.Content.RectTransform),
         nil
     )
-    actionRow.CanBeFocused = false
+    actionRow.CanBeFocused    = false
 
-    local playBtn = GUI.Button(
+    local playBtn             = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterLeft),
         "▶ Play", GUI.Alignment.Center, "GUIButtonSmall"
     )
-    playBtn.OnClicked = function()
-        if MidiMod.Network then
+    playBtn.OnClicked         = function()
+        if MGUI.selectedFile and MidiMod.Network then
             MidiMod.Network.requestPlay(MGUI.selectedFile, MGUI.tempoValue)
         end
         return true
     end
 
-    local stopBtn = GUI.Button(
+    local stopBtn             = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterRight),
         "■ Stop", GUI.Alignment.Center, "GUIButtonSmall"
     )
-    stopBtn.OnClicked = function()
+    stopBtn.OnClicked         = function()
         if MidiMod.Network then
             MidiMod.Network.requestStop()
         end
         return true
     end
 
-    local volHint = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.18), contentList.Content.RectTransform),
-        "* You can change midi volume in\nesc - settings - mod gameplay settings *",
+    -- ── Now playing ───────────────────────────────────────────────────────────
+    local nowPlayingLabel     = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
+        "",
         nil, nil, GUI.Alignment.Center
     )
-    volHint.TextColor = Color(110, 110, 110)
+    nowPlayingLabel.TextColor = Color(100, 255, 140)
+    nowPlayingLabel.Wrap      = true
 
-    statusLabel = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.12), contentList.Content.RectTransform),
+    -- ── Status ────────────────────────────────────────────────────────────────
+    statusLabel               = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
         "Ready  |  F5 to toggle",
         nil, nil, GUI.Alignment.Center
     )
-    statusLabel.TextColor = Color(140, 140, 140)
+    statusLabel.TextColor     = Color(140, 140, 140)
 
-    MGUI.panel = frame
-    MGUI.isOpen = true
+    -- ── Hints ─────────────────────────────────────────────────────────────────
+    local volHint             = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 0.10), contentList.Content.RectTransform),
+        "* Volume: Esc → Settings → Mod Gameplay Settings *",
+        nil, nil, GUI.Alignment.Center
+    )
+    volHint.TextColor         = Color(100, 100, 100)
+    volHint.Wrap              = true
+
+    MGUI.nowPlayingLabel      = nowPlayingLabel
+    MGUI.panel                = frame
+    MGUI.isOpen               = true
 end
 
+-- ── Public toggle ─────────────────────────────────────────────────────────────
 function MGUI.togglePanel(show)
     if show == nil then show = not MGUI.isOpen end
-
-    if show then
-        createPanel()
-    else
-        destroyPanel()
-    end
+    if show then createPanel() else destroyPanel() end
 end
 
--- Hook into the screen GUI pass so our overlay actually draws.
+-- ── GUI draw hook ─────────────────────────────────────────────────────────────
 Hook.Patch("Barotrauma.GameScreen", "AddToGUIUpdateList", function()
     if frame and MGUI.isOpen then
         frame.AddToGUIUpdateList()
     end
 end)
 
+-- ── Think hook ────────────────────────────────────────────────────────────────
 Hook.Add("think", "MidiMod.GUI.Think", function()
-    local ch = Character.Controlled
+    local ch         = Character.Controlled
     local holdingNow = ch and MidiMod.IsHoldingInstrument(ch) or false
 
-    -- Auto-open when picking up instrument
-    if holdingNow and not wasHoldingInstrument then
-        MGUI.togglePanel(true)
-    end
-
-    -- Auto-close when dropping instrument
-    if not holdingNow and wasHoldingInstrument then
-        MGUI.togglePanel(false)
-    end
-
+    if holdingNow and not wasHoldingInstrument then MGUI.togglePanel(true) end
+    if not holdingNow and wasHoldingInstrument then MGUI.togglePanel(false) end
     wasHoldingInstrument = holdingNow
 
-    -- F5 toggle (only while holding instrument)
     local f5Pressed = false
     pcall(function() f5Pressed = PlayerInput.KeyHit(Keys.F5) end)
-    if f5Pressed and holdingNow then
-        MGUI.togglePanel()
+    if f5Pressed and holdingNow then MGUI.togglePanel() end
+
+    if MGUI.isOpen and searchBox then
+        local currentText = ""
+        pcall(function() currentText = searchBox.Text or "" end)
+        if currentText ~= lastSearch then
+            lastSearch = currentText
+            rebuildFileList(lastSearch)
+        end
     end
 
-    -- Update status text
+    -- ── Update status label only ───────────────────────────────────────────────
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
             if MidiMod.Player.playing then
-                statusLabel.Text = "♪ Playing...  |  F5 to hide"
+                statusLabel.Text      = "♪ Playing...  |  F5 to hide"
                 statusLabel.TextColor = Color(100, 255, 140)
+                if MGUI.nowPlayingLabel and MidiMod.Player.currentFile then
+                    MGUI.nowPlayingLabel.Text = getFileName(MidiMod.Player.currentFile)
+                end
             else
-                statusLabel.Text = "Ready  |  F5 to toggle"
+                statusLabel.Text      = "Ready  |  F5 to toggle"
                 statusLabel.TextColor = Color(140, 140, 140)
+                if MGUI.nowPlayingLabel then
+                    MGUI.nowPlayingLabel.Text = ""
+                end
             end
         end)
     end
