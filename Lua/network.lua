@@ -240,8 +240,8 @@ function Network.requestPlay(fileName, tempoMult)
         end
         MidiMod.Player.play(character)
 
-        -- Tell server we started playing (for buffs)
-        if not Game.IsSingleplayer then
+        -- Tell server we started playing (for buffs), only if player wants buffs
+        if not Game.IsSingleplayer and MidiMod.BuffsEnabled then
             Network.notifyBuffStart(character)
         end
 

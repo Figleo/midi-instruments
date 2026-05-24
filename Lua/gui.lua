@@ -115,7 +115,7 @@ local function createPanel()
     frame.CanBeFocused = false
 
     -- ── Main window ───────────────────────────────────────────────────────────
-    local panelW, panelH = 360, 440
+    local panelW, panelH = 360, 600
     panelFrame = GUI.Frame(
         GUI.RectTransform(Point(panelW, panelH), frame.RectTransform, GUI.Anchor.BottomRight),
         "GUIFrameListBox"
@@ -225,44 +225,65 @@ local function createPanel()
     rebuildFileList(lastSearch)
 
     -- ── Divider ───────────────────────────────────────────────────────────────
-    local divider             = GUI.Frame(
+    local divider          = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.01), contentList.Content.RectTransform),
         "HorizontalLine"
     )
-    divider.CanBeFocused      = false
+    divider.CanBeFocused   = false
 
     -- ── Play / Stop ───────────────────────────────────────────────────────────
-    local actionRow           = GUI.Frame(
+    local actionRow        = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.11), contentList.Content.RectTransform),
         nil
     )
-    actionRow.CanBeFocused    = false
+    actionRow.CanBeFocused = false
 
-    local playBtn             = GUI.Button(
+    local playBtn          = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterLeft),
         "▶ Play", GUI.Alignment.Center, "GUIButtonSmall"
     )
-    playBtn.OnClicked         = function()
+    playBtn.OnClicked      = function()
         if MGUI.selectedFile and MidiMod.Network then
             MidiMod.Network.requestPlay(MGUI.selectedFile, MGUI.tempoValue)
         end
         return true
     end
 
-    local stopBtn             = GUI.Button(
+    local stopBtn          = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterRight),
         "■ Stop", GUI.Alignment.Center, "GUIButtonSmall"
     )
-    stopBtn.OnClicked         = function()
+    stopBtn.OnClicked      = function()
         if MidiMod.Network then
             MidiMod.Network.requestStop()
         end
         return true
     end
 
+
+    -- ── Buff toggle ───────────────────────────────────────────────────────────
+    local buffRow        = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
+        nil
+    )
+    buffRow.CanBeFocused = false
+
+    local buffTick       = GUI.TickBox(
+        GUI.RectTransform(Vector2(1, 1), buffRow.RectTransform, GUI.Anchor.CenterLeft),
+        "Talent Buffs"
+    )
+    buffTick.Selected    = MidiMod.BuffsEnabled
+    pcall(function()
+        buffTick.TextColor = Color(180, 180, 180)
+    end)
+    buffTick.OnSelected       = function(tb)
+        MidiMod.BuffsEnabled = tb.Selected
+        MidiMod.DebugLog("[GUI] Buffs " .. (tb.Selected and "enabled" or "disabled"))
+        return true
+    end
     -- ── Now playing ───────────────────────────────────────────────────────────
     local nowPlayingLabel     = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
+        GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
         "",
         nil, nil, GUI.Alignment.Center
     )
@@ -271,7 +292,7 @@ local function createPanel()
 
     -- ── Status ────────────────────────────────────────────────────────────────
     statusLabel               = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
+        GUI.RectTransform(Vector2(1, 0.04), contentList.Content.RectTransform),
         "Ready  |  F5 to toggle",
         nil, nil, GUI.Alignment.Center
     )
@@ -279,8 +300,8 @@ local function createPanel()
 
     -- ── Hints ─────────────────────────────────────────────────────────────────
     local volHint             = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.10), contentList.Content.RectTransform),
-        "* Volume: Esc → Settings → Mod Gameplay Settings *",
+        GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
+        "* Volume: Esc -> Settings -> Mod Gameplay Settings *",
         nil, nil, GUI.Alignment.Center
     )
     volHint.TextColor         = Color(100, 100, 100)

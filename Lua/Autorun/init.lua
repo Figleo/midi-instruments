@@ -19,6 +19,9 @@ MidiMod.Debug = true
 -- Client-side volume (loaded from companion mod XML settings)
 MidiMod.CurrentVolume = 0.75
 
+-- Client-side toggle: allow this player to receive talent buffs while playing
+MidiMod.BuffsEnabled = true
+
 MidiMod.Instruments = {
     ["accordion"] = true,
     ["guitar"] = true,
