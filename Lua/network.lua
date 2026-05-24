@@ -142,22 +142,21 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
     end
 end
 
--- Lightweight throttle: accumulate notes and send at most every 200ms
--- This prevents frame-by-frame network spam on fast MIDIs
-local _pendingNotes = {}  -- charID -> {instrId, parts={}}
+-- Lightweight throttle: accumulate notes and send at most every 50ms.
+local _pendingNotes = {}   -- charID -> {instrId, notes={}}
 local _lastSendTime = 0
-local SEND_INTERVAL = 0.2 -- seconds
+local SEND_INTERVAL = 0.05 -- seconds (50ms)
 
 function Network.broadcastNotes(charID, notesStr, instrId)
     if Game.IsSingleplayer then return end
-
-    -- Accumulate notes
     if not _pendingNotes[charID] then
-        _pendingNotes[charID] = { instrId = instrId or "accordion", parts = {} }
+        _pendingNotes[charID] = { instrId = instrId or "accordion", notes = {} }
     end
     local pending = _pendingNotes[charID]
     pending.instrId = instrId or pending.instrId
-    table.insert(pending.parts, notesStr)
+    for token in string.gmatch(notesStr, "([^;]+)") do
+        table.insert(pending.notes, token)
+    end
 end
 
 -- Flush pending notes on a timer (called from think hook below)
@@ -167,8 +166,8 @@ local function flushPendingNotes()
     _lastSendTime = now
 
     for charID, pending in pairs(_pendingNotes) do
-        if #pending.parts > 0 then
-            local combined = table.concat(pending.parts, ";")
+        if #pending.notes > 0 then
+            local combined = table.concat(pending.notes, ";")
 
             local msg = Networking.Start(NET_NOTES)
             msg.WriteUInt16(charID)
