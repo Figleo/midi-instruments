@@ -162,8 +162,9 @@ end
 local function buildScore(allEvents, ticksPerQuarter)
     table.sort(allEvents, function(a, b)
         if a.tick == b.tick then
-            if a.type == "tempo" then return true end
-            if b.type == "tempo" then return false end
+            -- Tempo events go first, but two tempos at same tick are equal (return false)
+            if a.type == "tempo" and b.type ~= "tempo" then return true end
+            if b.type == "tempo" and a.type ~= "tempo" then return false end
             return false
         end
         return a.tick < b.tick
