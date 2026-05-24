@@ -387,40 +387,36 @@ Hook.Add("think", "midi_sound_tick", function()
     end
 end)
 
--- Protect our channels from external pitch modification (SPW / Soundproof Walls compatibility).
--- Prefix on set_FrequencyMultiplier: if an external caller (SPW, other mods) tries to change
--- pitch on one of our channels, we block it. Our own code uses _weAreSettingPitch flag to bypass.
--- The check is O(1) — a single boolean + hash-table lookup — so overhead is negligible.
-local _pitchPatchOk = false
+-- SPW compatibility note:
+-- We do NOT Hook.Patch set_FrequencyMultiplier because it fires on EVERY sound
+-- channel in the game (including all SPW-managed sounds). The accumulated overhead
+-- freezes the client and breaks the hosted-server pipe. The per-frame re-apply in
+-- the think hook above is sufficient to maintain our pitch. OLD version used the
+-- same approach and was stable with SPW.
 
-local function pitchGuardPrefix(instance, ptable)
-    if _weAreSettingPitch then return end
-    if SoundEngine.protectedChannels[instance] then
-        ptable.PreventExecution = true
+-- Release a note: gentle fade-out (noteOff from MIDI)
+-- Only stops the oldest instance of this note — allows overlapping same-note sounds
+local NOTE_RELEASE_FADE = 0.08  -- 80ms fade, smooth without clicks
+
+function SoundEngine.releaseNote(midiNote, charID)
+    -- Check active channels for this note
+    for i = 1, #SoundEngine.activeChannels do
+        local info = SoundEngine.activeChannels[i]
+        if info.note == midiNote and (not charID or info.charID == charID) then
+            SoundEngine.protectedChannels[info.channel] = nil
+            pcall(function() info.channel.FadeOutAndDispose(NOTE_RELEASE_FADE) end)
+            table.remove(SoundEngine.activeChannels, i)
+            break  -- only release one instance (oldest)
+        end
+    end
+
+    -- Clean tracking
+    if charID and SoundEngine.activeNoteUIDs[charID] then
+        SoundEngine.activeNoteUIDs[charID][midiNote] = nil
     end
 end
 
--- Try canonical namespace first, fall back to alternative
-for _, className in ipairs({
-    "Barotrauma.Sounds.SoundChannel",
-    "Barotrauma.SoundChannel",
-    "SoundChannel",
-}) do
-    if _pitchPatchOk then break end
-    pcall(function()
-        Hook.Patch(className, "set_FrequencyMultiplier",
-            pitchGuardPrefix, Hook.HookMethodType.Before)
-        _pitchPatchOk = true
-        MidiMod.Log("[SoundEngine] Pitch guard patched on " .. className)
-    end)
-end
-
-if not _pitchPatchOk then
-    MidiMod.Log("[SoundEngine] WARNING: Pitch guard patch failed. Relying on per-frame re-apply only.")
-end
-
--- Stop a specific note
--- Stop a specific note (по uid для точности)
+-- Stop a specific note (hard kill, all instances)
 function SoundEngine.stopNote(midiNote, charID, uid)
     -- Убрать из очереди
     for i = #SoundEngine.noteQueue, 1, -1 do
