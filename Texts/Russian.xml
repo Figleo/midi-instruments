@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<infotexts language="Russian" nowhitespace="false" translatedname="English">
+  <MIDIInstruments.Midivolume.DisplayName>MIDI громкость</MIDIInstruments.Midivolume.DisplayName>
+  <entityname.guitarelectric>Электрогитара</entityname.guitarelectric>
+  <entitydescription.guitarelectric>Просто электрогитара</entitydescription.guitarelectric>
+</infotexts>

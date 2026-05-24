@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <infotexts language="English" nowhitespace="false" translatedname="English">
   <MIDIInstruments.Midivolume.DisplayName>MIDI Volume</MIDIInstruments.Midivolume.DisplayName>
+  <entityname.guitarelectric>Electric guitar</entityname.guitarelectric>
+  <entitydescription.guitarelectric>Just electric guitar</entitydescription.guitarelectric>
 </infotexts>
