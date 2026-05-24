@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <contentpackage name="MIDIInstruments" modversion="1.15" corepackage="False" gameversion="1.12.6.2">
   <Item file="%ModDir%/content/instrument_nosounds.xml" />
+  <Item file="%ModDir%/content/instrument_new.xml" />
   <Text file="%ModDir%/Texts/English.xml" />
 </contentpackage>

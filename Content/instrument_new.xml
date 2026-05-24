@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Items>
+  <Item name="" identifier="guitarelectric" category="Misc" Tags="bigitem,instrument"
+        scale="0.5" description="" price="300" isshootable="true">
+    <Upgrade gameversion="0.9.2.0" scale="0.5"/>
+    <Price baseprice="100">
+      <Price storeidentifier="merchantoutpost" minavailable="1"/>
+      <Price storeidentifier="merchantcity" minavailable="1"/>
+      <Price storeidentifier="merchantresearch" minavailable="1" />
+      <Price storeidentifier="merchantmilitary" minavailable="1" />
+      <Price storeidentifier="merchantmine" minavailable="1" />
+    </Price>
+    <InventoryIcon texture="%ModDir%/Content/instruments_icons.png" sourcerect="0,0,64,64" origin="0.5,0.5" />
+    <Sprite texture="%ModDir%/Content/instruments.png" sourcerect="0,0,97,254" depth="0.6" origin="0.5,0.5" />
+    <Body radius="40" height="160" density="12" />
+    <RangedWeapon reload="0" />
+    <Holdable slots="RightHand+LeftHand" controlpose="true"
+              aimpos="30,-20" handle1="-2,-40" handle2="5,50"
+              swingamount="10,20" swingspeed="1" swingwhenusing="true"
+              msg="ItemMsgPickUpSelect">
+      <StatusEffect statuseffecttags="playingguitar" type="OnUse"
+                    target="Character" />
+    </Holdable>
+  </Item>
+</Items>

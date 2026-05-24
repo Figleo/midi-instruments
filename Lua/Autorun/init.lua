@@ -22,6 +22,7 @@ MidiMod.CurrentVolume = 0.75
 MidiMod.Instruments = {
     ["accordion"] = true,
     ["guitar"] = true,
+    ["guitarelectric"] = true,
     ["harmonica"] = true
 }
 

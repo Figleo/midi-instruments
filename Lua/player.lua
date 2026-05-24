@@ -125,6 +125,7 @@ function Player.stop()
 end
 
 -- Per-player stop: for network, stops sounds from a specific remote character
+-- Per-player stop: for network, stops sounds from a specific remote character
 function Player.stopChar(charID)
     -- If this is our own character, do a full stop
     if Player.sourceCharacter then
@@ -136,9 +137,14 @@ function Player.stopChar(charID)
         end
     end
 
-    -- Otherwise just stop sounds for that remote character
+    -- Otherwise just stop all sounds for that remote character
     if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
         MidiMod.SoundEngine.stopAllForChar(charID)
+    end
+
+    -- Очисти трекинг нот для этого персонажа
+    if MidiMod.SoundEngine and MidiMod.SoundEngine.activeNoteUIDs then
+        MidiMod.SoundEngine.activeNoteUIDs[charID] = nil
     end
 
     Player.streamingCharacters[charID] = nil
@@ -243,7 +249,10 @@ local function onThink()
         local note = Player.score[Player.cursor]
         if note.timeMs <= elapsed then
             if MidiMod.SoundEngine then
-                pcall(MidiMod.SoundEngine.playNote, note.note, note.velocity, worldPos, currentInst, charID)
+                local _, uid = pcall(function()
+                    return MidiMod.SoundEngine.playNote(note.note, note.velocity, worldPos, currentInst, charID)
+                end)
+                -- uid сохранится в SoundEngine.activeNoteUIDs[charID][note.note]
             end
             if Player.isStreamingHost then
                 table.insert(streamBatch, note.note .. "," .. note.velocity)

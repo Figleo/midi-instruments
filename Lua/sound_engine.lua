@@ -37,16 +37,18 @@ SoundEngine.soundBankIdx      = {}
 SoundEngine.activeChannels    = {}
 SoundEngine.noteQueue         = {}
 SoundEngine.protectedChannels = {}
+SoundEngine.activeNoteUIDs    = {}
 SoundEngine.notesThisFrame    = 0
 SoundEngine.initialized       = false
 
--- Chunked loading state
-local _loadQueue              = nil
-local _loadDone               = false
-local _loadSamplesLoaded      = 0
-local _loadObjectsLoaded      = 0
 
-local _weAreSettingPitch      = false
+-- Chunked loading state
+local _loadQueue         = nil
+local _loadDone          = false
+local _loadSamplesLoaded = 0
+local _loadObjectsLoaded = 0
+
+local _weAreSettingPitch = false
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -54,11 +56,18 @@ local function noteToName(midiNote)
     return NOTE_NAMES[noteIndex] .. octave
 end
 
+local _channelUidCounter = 0
+
+local function nextUID()
+    _channelUidCounter = _channelUidCounter + 1
+    return _channelUidCounter
+end
+
 -- Begin chunked loading — call once, then pump via think hook
 function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
 
-    local instruments = { "accordion", "guitar", "harmonica" }
+    local instruments = { "accordion", "guitar", "guitarelectric", "harmonica" }
     _loadQueue = {}
 
     for _, inst in ipairs(instruments) do
@@ -291,7 +300,10 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         pcall(function() channel.Position = Vector3(worldPos.X, worldPos.Y, 0) end)
     end
 
+    local uid = nextUID() -- используем глобальный счётчик
+
     table.insert(SoundEngine.activeChannels, {
+        uid        = uid,
         channel    = channel,
         note       = midiNote,
         sampleNote = sampleNote,
@@ -302,7 +314,15 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         charID     = charID
     })
 
-    return channel
+    -- Сохрани uid в трекинг
+    if charID then
+        if not SoundEngine.activeNoteUIDs[charID] then
+            SoundEngine.activeNoteUIDs[charID] = {}
+        end
+        SoundEngine.activeNoteUIDs[charID][midiNote] = uid
+    end
+
+    return channel, uid
 end
 
 function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
@@ -319,7 +339,8 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
 
     if SoundEngine.notesThisFrame < MAX_NEW_PER_FRAME then
         SoundEngine.notesThisFrame = SoundEngine.notesThisFrame + 1
-        return doPlayNote(midiNote, velocity, worldPos, instrument, charID)
+        local ch, uid = doPlayNote(midiNote, velocity, worldPos, instrument, charID)
+        return ch, uid -- ← пробросить uid наружу
     end
 
     if #SoundEngine.noteQueue < 64 then
@@ -331,7 +352,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
             charID     = charID
         })
     end
-    return nil
+    return nil, nil
 end
 
 -- Think Hook: cleanup + pitch protection + queue drain
@@ -399,17 +420,32 @@ if not _pitchPatchOk then
 end
 
 -- Stop a specific note
-function SoundEngine.stopNote(midiNote)
+-- Stop a specific note (по uid для точности)
+function SoundEngine.stopNote(midiNote, charID, uid)
+    -- Убрать из очереди
     for i = #SoundEngine.noteQueue, 1, -1 do
         if SoundEngine.noteQueue[i].midiNote == midiNote then
-            table.remove(SoundEngine.noteQueue, i)
+            if not charID or SoundEngine.noteQueue[i].charID == charID then
+                table.remove(SoundEngine.noteQueue, i)
+            end
         end
     end
 
+    -- Убрать из активных каналов
     for i = #SoundEngine.activeChannels, 1, -1 do
-        if SoundEngine.activeChannels[i].note == midiNote then
-            fadeDisposeChannel(i)
+        local info = SoundEngine.activeChannels[i]
+        if info.note == midiNote and (not charID or info.charID == charID) then
+            -- Если uid передан — убиваем только точный канал
+            -- Если нет — убиваем все каналы этой ноты (старое поведение)
+            if uid == nil or info.uid == uid then
+                fadeDisposeChannel(i)
+            end
         end
+    end
+
+    -- Очисти из трекинга
+    if charID and SoundEngine.activeNoteUIDs[charID] then
+        SoundEngine.activeNoteUIDs[charID][midiNote] = nil
     end
 end
 

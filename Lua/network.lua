@@ -1,10 +1,10 @@
 -- Network: real-time note sync for multiplayer
 -- Direct send (no buffering) to avoid server event spam
 
-MidiMod = MidiMod or {}
-MidiMod.Network = {}
+MidiMod              = MidiMod or {}
+MidiMod.Network      = {}
 
-local Network = MidiMod.Network
+local Network        = MidiMod.Network
 
 local NET_STOP       = "MidiMod.Stop"
 local NET_NOTES      = "MidiMod.Notes"
@@ -100,6 +100,7 @@ function Network.resolveMidiPath(fileName)
 end
 
 -- Play notes received from a remote player
+-- Play notes received from a remote player
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
 
@@ -125,10 +126,11 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         local note, vel = string.match(part, "(%d+),(%d+)")
         if note and vel then
             pcall(function()
-                MidiMod.SoundEngine.playNote(
+                local _, uid = MidiMod.SoundEngine.playNote(
                     tonumber(note), tonumber(vel),
                     worldPos, instrId, charID
                 )
+                -- uid автоматически сохраняется в SoundEngine.activeNoteUIDs
             end)
         end
     end
@@ -138,7 +140,7 @@ end
 -- This prevents frame-by-frame network spam on fast MIDIs
 local _pendingNotes = {}  -- charID -> {instrId, parts={}}
 local _lastSendTime = 0
-local SEND_INTERVAL = 0.2  -- seconds
+local SEND_INTERVAL = 0.2 -- seconds
 
 function Network.broadcastNotes(charID, notesStr, instrId)
     if Game.IsSingleplayer then return end
