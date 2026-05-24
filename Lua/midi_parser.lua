@@ -185,45 +185,64 @@ local function buildScore(allEvents, ticksPerQuarter)
         end
     end
 
+    -- Build event-based score: separate noteOn and noteOff events
     local score = {}
     local activeNotes = {}
 
     for _, ev in ipairs(allEvents) do
         if ev.type == "noteOn" then
             local key = ev.channel .. "_" .. ev.note
-            activeNotes[key] = {
+            -- If this note is already on, emit an off first (re-trigger)
+            if activeNotes[key] then
+                table.insert(score, {
+                    timeMs = ev.timeMs,
+                    type = "off",
+                    note = ev.note,
+                    channel = ev.channel,
+                })
+            end
+            activeNotes[key] = ev.timeMs
+            table.insert(score, {
                 timeMs = ev.timeMs,
-                velocity = ev.velocity,
+                type = "on",
                 note = ev.note,
+                velocity = ev.velocity,
                 channel = ev.channel,
-            }
+            })
         elseif ev.type == "noteOff" then
             local key = ev.channel .. "_" .. ev.note
-            local start = activeNotes[key]
-            if start then
+            if activeNotes[key] then
                 table.insert(score, {
-                    timeMs = start.timeMs,
-                    note = start.note,
-                    velocity = start.velocity,
-                    durationMs = ev.timeMs - start.timeMs,
-                    channel = start.channel,
+                    timeMs = ev.timeMs,
+                    type = "off",
+                    note = ev.note,
+                    channel = ev.channel,
                 })
                 activeNotes[key] = nil
             end
         end
     end
 
-    for _, start in pairs(activeNotes) do
+    -- Close any notes that never got a noteOff (add off 200ms after their start)
+    for key, startTime in pairs(activeNotes) do
+        local ch, noteStr = string.match(key, "(%d+)_(%d+)")
         table.insert(score, {
-            timeMs = start.timeMs,
-            note = start.note,
-            velocity = start.velocity,
-            durationMs = 200,
-            channel = start.channel,
+            timeMs = startTime + 200,
+            type = "off",
+            note = tonumber(noteStr),
+            channel = tonumber(ch),
         })
     end
 
-    table.sort(score, function(a, b) return a.timeMs < b.timeMs end)
+    table.sort(score, function(a, b)
+        if a.timeMs == b.timeMs then
+            -- noteOff before noteOn at the same time (clean transitions)
+            if a.type == "off" and b.type == "on" then return true end
+            if a.type == "on" and b.type == "off" then return false end
+            return false
+        end
+        return a.timeMs < b.timeMs
+    end)
 
     return score
 end

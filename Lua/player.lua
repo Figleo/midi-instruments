@@ -246,17 +246,28 @@ local function onThink()
     pcall(function() charID = Player.sourceCharacter.ID end)
 
     while Player.cursor <= #Player.score do
-        local note = Player.score[Player.cursor]
-        if note.timeMs <= elapsed then
-            if MidiMod.SoundEngine then
-                local _, uid = pcall(function()
-                    return MidiMod.SoundEngine.playNote(note.note, note.velocity, worldPos, currentInst, charID)
-                end)
-                -- uid сохранится в SoundEngine.activeNoteUIDs[charID][note.note]
+        local event = Player.score[Player.cursor]
+        if event.timeMs <= elapsed then
+            local evType = event.type or "on"  -- backward compat: no type = noteOn
+
+            if evType == "on" then
+                -- Note On
+                if MidiMod.SoundEngine then
+                    pcall(MidiMod.SoundEngine.playNote, event.note, event.velocity, worldPos, currentInst, charID)
+                end
+                if Player.isStreamingHost then
+                    table.insert(streamBatch, event.note .. "," .. event.velocity)
+                end
+            elseif evType == "off" then
+                -- Note Off — smooth fade-out
+                if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
+                    pcall(MidiMod.SoundEngine.releaseNote, event.note, charID)
+                end
+                if Player.isStreamingHost then
+                    table.insert(streamBatch, event.note .. ",0")  -- velocity 0 = noteOff
+                end
             end
-            if Player.isStreamingHost then
-                table.insert(streamBatch, note.note .. "," .. note.velocity)
-            end
+
             Player.cursor = Player.cursor + 1
         else
             break

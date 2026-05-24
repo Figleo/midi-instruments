@@ -99,8 +99,7 @@ function Network.resolveMidiPath(fileName)
     return MidiMod.BasePath .. "Midi/" .. fileName
 end
 
--- Play notes received from a remote player
--- Play notes received from a remote player
+-- Play/release notes received from a remote player
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
 
@@ -125,13 +124,20 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
     for part in string.gmatch(notesStr, "([^;]+)") do
         local note, vel = string.match(part, "(%d+),(%d+)")
         if note and vel then
-            pcall(function()
-                local _, uid = MidiMod.SoundEngine.playNote(
-                    tonumber(note), tonumber(vel),
-                    worldPos, instrId, charID
-                )
-                -- uid автоматически сохраняется в SoundEngine.activeNoteUIDs
-            end)
+            local noteNum = tonumber(note)
+            local velNum = tonumber(vel)
+
+            if velNum == 0 then
+                -- noteOff: smooth fade-out
+                if MidiMod.SoundEngine.releaseNote then
+                    pcall(MidiMod.SoundEngine.releaseNote, noteNum, charID)
+                end
+            else
+                -- noteOn: play the sound
+                pcall(function()
+                    MidiMod.SoundEngine.playNote(noteNum, velNum, worldPos, instrId, charID)
+                end)
+            end
         end
     end
 end
