@@ -142,54 +142,23 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
     end
 end
 
--- Lightweight throttle: accumulate notes and send at most every 50ms.
-local _pendingNotes = {}   -- charID -> {instrId, notes={}}
-local _lastSendTime = 0
-local SEND_INTERVAL = 0.05 -- seconds (50ms)
-
+-- Direct send: no buffering, notes go out immediately to preserve timing
 function Network.broadcastNotes(charID, notesStr, instrId)
     if Game.IsSingleplayer then return end
-    if not _pendingNotes[charID] then
-        _pendingNotes[charID] = { instrId = instrId or "accordion", notes = {} }
-    end
-    local pending = _pendingNotes[charID]
-    pending.instrId = instrId or pending.instrId
-    for token in string.gmatch(notesStr, "([^;]+)") do
-        table.insert(pending.notes, token)
-    end
-end
 
--- Flush pending notes on a timer (called from think hook below)
-local function flushPendingNotes()
-    local now = os.clock()
-    if (now - _lastSendTime) < SEND_INTERVAL then return end
-    _lastSendTime = now
+    local msg = Networking.Start(NET_NOTES)
+    msg.WriteUInt16(charID)
+    msg.WriteString(notesStr)
+    msg.WriteString(instrId or "accordion")
 
-    for charID, pending in pairs(_pendingNotes) do
-        if #pending.notes > 0 then
-            local combined = table.concat(pending.notes, ";")
-
-            local msg = Networking.Start(NET_NOTES)
-            msg.WriteUInt16(charID)
-            msg.WriteString(combined)
-            msg.WriteString(pending.instrId)
-
-            if SERVER then
-                for _, c in pairs(Client.ClientList) do
-                    Networking.Send(msg, c.Connection)
-                end
-            else
-                Networking.Send(msg)
-            end
+    if SERVER then
+        for _, c in pairs(Client.ClientList) do
+            Networking.Send(msg, c.Connection)
         end
+    else
+        Networking.Send(msg)
     end
-    _pendingNotes = {}
 end
-
-Hook.Add("think", "MidiMod.Network.Flush", function()
-    if Game.IsSingleplayer then return end
-    flushPendingNotes()
-end)
 
 -- Buff notifications (sent once on play start/stop, not spammed)
 
