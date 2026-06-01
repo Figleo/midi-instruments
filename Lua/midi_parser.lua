@@ -61,7 +61,9 @@ local function parseHeader(data, pos)
     }, pos
 end
 
-local function parseTrack(data, pos)
+local YIELD_EVERY = 200
+
+local function parseTrack(data, pos, yieldFn)
     local chunk
     chunk, pos = readBytes(data, pos, 4)
     if chunk ~= "MTrk" then
@@ -75,6 +77,7 @@ local function parseTrack(data, pos)
     local events = {}
     local absoluteTick = 0
     local runningStatus = 0
+    local eventCount = 0
 
     while pos < trackEnd do
         local delta
@@ -105,6 +108,7 @@ local function parseTrack(data, pos)
                 note = note,
                 velocity = velocity,
             })
+            eventCount = eventCount + 1
         elseif eventType == 0x8 then
             local note, velocity
             note, pos = readUint8(data, pos)
@@ -116,6 +120,7 @@ local function parseTrack(data, pos)
                 note = note,
                 velocity = velocity,
             })
+            eventCount = eventCount + 1
         elseif eventType == 0xA then
             pos = pos + 2
         elseif eventType == 0xB then
@@ -153,6 +158,10 @@ local function parseTrack(data, pos)
             pos = pos + sysexLen
         else
             break
+        end
+
+        if yieldFn and eventCount % YIELD_EVERY == 0 then
+            yieldFn()
         end
     end
 
@@ -279,6 +288,82 @@ function MidiParser.parse(filePath)
     MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
 
     return score, header
+end
+
+-- Async parse: spreads work across frames via coroutine to avoid main-thread stutter.
+-- onDone(score) is called when complete; onError(msg) on failure.
+
+MidiParser._parseState = nil
+
+function MidiParser.cancelAsync()
+    MidiParser._parseState = nil
+end
+
+function MidiParser.parseAsync(filePath, onDone, onError)
+    MidiParser._parseState = nil
+
+    local co = coroutine.create(function()
+        local file = io.open(filePath, "rb")
+        if not file then
+            error("[MidiParser] Cannot open file: " .. filePath)
+        end
+        local data = file:read("*all")
+        file:close()
+        coroutine.yield()  -- yield after disk read
+
+        if not data or #data < 14 then
+            error("[MidiParser] File too small or empty: " .. filePath)
+        end
+
+        local pos = 1
+        local header
+        header, pos = parseHeader(data, pos)
+
+        local allEvents = {}
+        for i = 1, header.trackCount do
+            local trackEvents
+            trackEvents, pos = parseTrack(data, pos, coroutine.yield)
+            for _, ev in ipairs(trackEvents) do
+                table.insert(allEvents, ev)
+            end
+        end
+        coroutine.yield()  -- yield before sort
+
+        local score = buildScore(allEvents, header.ticksPerQuarter)
+        MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
+        return score
+    end)
+
+    MidiParser._parseState = {
+        co      = co,
+        onDone  = onDone,
+        onError = onError,
+    }
+
+    -- First resume to kick off file read
+    local ok, val = coroutine.resume(co)
+    if not ok then
+        MidiParser._parseState = nil
+        if onError then pcall(onError, val) end
+    elseif coroutine.status(co) == "dead" then
+        MidiParser._parseState = nil
+        if onDone then pcall(onDone, val) end
+    end
+end
+
+if CLIENT then
+    Hook.Add("think", "midi_parse_pump", function()
+        local state = MidiParser._parseState
+        if not state then return end
+        local ok, val = coroutine.resume(state.co)
+        if not ok then
+            MidiParser._parseState = nil
+            if state.onError then pcall(state.onError, val) end
+        elseif coroutine.status(state.co) == "dead" then
+            MidiParser._parseState = nil
+            if state.onDone then pcall(state.onDone, val) end
+        end
+    end)
 end
 
 -- Searching MIDI files

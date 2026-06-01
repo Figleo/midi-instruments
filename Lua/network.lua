@@ -184,7 +184,7 @@ function Network.notifyBuffStop(character)
     Networking.Send(msg)
 end
 
--- High-level: load + play a MIDI file
+-- High-level: load + play a MIDI file (async parse, no main-thread stutter)
 function Network.requestPlay(fileName, tempoMult)
     tempoMult = tempoMult or 1.0
 
@@ -200,27 +200,36 @@ function Network.requestPlay(fileName, tempoMult)
     local fullPath = Network.resolveMidiPath(fileName)
     MidiMod.Log("Loading MIDI: " .. fullPath)
 
-    local success = MidiMod.Player.loadFile(fullPath)
-    if success then
-        MidiMod.Player.setTempo(tempoMult)
-        if not Game.IsSingleplayer then
-            MidiMod.Player.isStreamingHost = true
+    MidiMod.MidiParser.parseAsync(
+        fullPath,
+        function(score)
+            if not MidiMod.Player.loadScore(score, fullPath) then
+                MidiMod.Log("Failed to load MIDI: " .. fullPath)
+                return
+            end
+            MidiMod.Player.setTempo(tempoMult)
+            if not Game.IsSingleplayer then
+                MidiMod.Player.isStreamingHost = true
+            end
+            MidiMod.Player.play(character)
+            if not Game.IsSingleplayer and MidiMod.BuffsEnabled then
+                Network.notifyBuffStart(character)
+            end
+            MidiMod.Log("Started streaming MIDI!")
+        end,
+        function(err)
+            MidiMod.Log("Failed to parse MIDI: " .. tostring(err))
         end
-        MidiMod.Player.play(character)
-
-        -- Tell server we started playing (for buffs), only if player wants buffs
-        if not Game.IsSingleplayer and MidiMod.BuffsEnabled then
-            Network.notifyBuffStart(character)
-        end
-
-        MidiMod.Log("Started streaming MIDI!")
-    else
-        MidiMod.Log("Failed to load MIDI: " .. fullPath)
-    end
+    )
 end
 
 -- High-level: stop playback and notify others
 function Network.requestStop(charID)
+    -- Cancel any in-progress async parse
+    if MidiMod.MidiParser then
+        pcall(MidiMod.MidiParser.cancelAsync)
+    end
+
     if not charID then
         local ch = Character.Controlled
         if ch then charID = ch.ID else return end
