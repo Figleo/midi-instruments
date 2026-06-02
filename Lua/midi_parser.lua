@@ -1,5 +1,3 @@
--- Reads standard MIDI files and turns them into a simple note timeline.
-
 MidiMod = MidiMod or {}
 MidiMod.MidiParser = {}
 
@@ -61,7 +59,7 @@ local function parseHeader(data, pos)
     }, pos
 end
 
-local YIELD_EVERY = 200
+local YIELD_EVERY = 64
 
 local function parseTrack(data, pos, yieldFn)
     local chunk
@@ -77,7 +75,7 @@ local function parseTrack(data, pos, yieldFn)
     local events = {}
     local absoluteTick = 0
     local runningStatus = 0
-    local eventCount = 0
+    local loopCount = 0
 
     while pos < trackEnd do
         local delta
@@ -108,7 +106,6 @@ local function parseTrack(data, pos, yieldFn)
                 note = note,
                 velocity = velocity,
             })
-            eventCount = eventCount + 1
         elseif eventType == 0x8 then
             local note, velocity
             note, pos = readUint8(data, pos)
@@ -120,7 +117,6 @@ local function parseTrack(data, pos, yieldFn)
                 note = note,
                 velocity = velocity,
             })
-            eventCount = eventCount + 1
         elseif eventType == 0xA then
             pos = pos + 2
         elseif eventType == 0xB then
@@ -160,24 +156,63 @@ local function parseTrack(data, pos, yieldFn)
             break
         end
 
-        if yieldFn and eventCount % YIELD_EVERY == 0 then
-            yieldFn()
+        if yieldFn then
+            loopCount = loopCount + 1
+            if loopCount % YIELD_EVERY == 0 then
+                yieldFn()
+            end
         end
     end
 
     return events, math.max(pos, trackEnd)
 end
 
-local function buildScore(allEvents, ticksPerQuarter)
-    table.sort(allEvents, function(a, b)
-        if a.tick == b.tick then
-            -- Tempo events go first, but two tempos at same tick are equal (return false)
-            if a.type == "tempo" and b.type ~= "tempo" then return true end
-            if b.type == "tempo" and a.type ~= "tempo" then return false end
-            return false
+-- Event ordering: tick ascending; at same tick: tempo > noteOff > noteOn.
+local function evLess(a, b)
+    if a.tick ~= b.tick then return a.tick < b.tick end
+    if a.type == "tempo"   and b.type ~= "tempo"   then return true  end
+    if b.type == "tempo"   and a.type ~= "tempo"   then return false end
+    if a.type == "noteOff" and b.type == "noteOn"  then return true  end
+    if a.type == "noteOn"  and b.type == "noteOff" then return false end
+    return false
+end
+
+local function mergeTracks(tracks, yieldFn)
+    if #tracks == 1 then return tracks[1] end
+
+    local k       = #tracks
+    local indices = {}
+    for i = 1, k do indices[i] = 1 end
+
+    local result = {}
+    local count  = 0
+
+    while true do
+        local bestI, bestEv
+        for i = 1, k do
+            local ev = tracks[i][indices[i]]
+            if ev and (not bestEv or evLess(ev, bestEv)) then
+                bestEv = ev
+                bestI  = i
+            end
         end
-        return a.tick < b.tick
-    end)
+        if not bestI then break end
+
+        count          = count + 1
+        result[count]  = bestEv
+        indices[bestI] = indices[bestI] + 1
+
+        if yieldFn and count % YIELD_EVERY == 0 then
+            yieldFn()
+        end
+    end
+
+    return result
+end
+
+local function buildScore(tracks, ticksPerQuarter, yieldFn)
+    local allEvents = mergeTracks(tracks, yieldFn)
+    if yieldFn then yieldFn() end
 
     local tempo = 500000
     local lastTick = 0
@@ -195,14 +230,14 @@ local function buildScore(allEvents, ticksPerQuarter)
         end
     end
 
-    -- Build event-based score: separate noteOn and noteOff events
+    if yieldFn then yieldFn() end
+
     local score = {}
     local activeNotes = {}
 
     for _, ev in ipairs(allEvents) do
         if ev.type == "noteOn" then
             local key = ev.channel .. "_" .. ev.note
-            -- If this note is already on, emit an off first (re-trigger)
             if activeNotes[key] then
                 table.insert(score, {
                     timeMs = ev.timeMs,
@@ -233,7 +268,6 @@ local function buildScore(allEvents, ticksPerQuarter)
         end
     end
 
-    -- Close any notes that never got a noteOff (add off 200ms after their start)
     for key, startTime in pairs(activeNotes) do
         local ch, noteStr = string.match(key, "(%d+)_(%d+)")
         table.insert(score, {
@@ -243,16 +277,6 @@ local function buildScore(allEvents, ticksPerQuarter)
             channel = tonumber(ch),
         })
     end
-
-    table.sort(score, function(a, b)
-        if a.timeMs == b.timeMs then
-            -- noteOff before noteOn at the same time (clean transitions)
-            if a.type == "off" and b.type == "on" then return true end
-            if a.type == "on" and b.type == "off" then return false end
-            return false
-        end
-        return a.timeMs < b.timeMs
-    end)
 
     return score
 end
@@ -275,29 +299,24 @@ function MidiParser.parse(filePath)
     local header
     header, pos = parseHeader(data, pos)
 
-    local allEvents = {}
+    local tracks = {}
     for i = 1, header.trackCount do
-        local trackEvents
-        trackEvents, pos = parseTrack(data, pos)
-        for _, ev in ipairs(trackEvents) do
-            table.insert(allEvents, ev)
-        end
+        tracks[i], pos = parseTrack(data, pos)
     end
 
-    local score = buildScore(allEvents, header.ticksPerQuarter)
+    local score = buildScore(tracks, header.ticksPerQuarter)
     MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
 
     return score, header
 end
-
--- Async parse: spreads work across frames via coroutine to avoid main-thread stutter.
--- onDone(score) is called when complete; onError(msg) on failure.
 
 MidiParser._parseState = nil
 
 function MidiParser.cancelAsync()
     MidiParser._parseState = nil
 end
+
+local RESUMES_PER_FRAME = 16
 
 function MidiParser.parseAsync(filePath, onDone, onError)
     MidiParser._parseState = nil
@@ -309,7 +328,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         end
         local data = file:read("*all")
         file:close()
-        coroutine.yield()  -- yield after disk read
+        coroutine.yield()
 
         if not data or #data < 14 then
             error("[MidiParser] File too small or empty: " .. filePath)
@@ -319,17 +338,13 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         local header
         header, pos = parseHeader(data, pos)
 
-        local allEvents = {}
+        local tracks = {}
         for i = 1, header.trackCount do
-            local trackEvents
-            trackEvents, pos = parseTrack(data, pos, coroutine.yield)
-            for _, ev in ipairs(trackEvents) do
-                table.insert(allEvents, ev)
-            end
+            tracks[i], pos = parseTrack(data, pos, coroutine.yield)
+            coroutine.yield()
         end
-        coroutine.yield()  -- yield before sort
 
-        local score = buildScore(allEvents, header.ticksPerQuarter)
+        local score = buildScore(tracks, header.ticksPerQuarter, coroutine.yield)
         MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
         return score
     end)
@@ -340,7 +355,6 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         onError = onError,
     }
 
-    -- First resume to kick off file read
     local ok, val = coroutine.resume(co)
     if not ok then
         MidiParser._parseState = nil
@@ -355,13 +369,18 @@ if CLIENT then
     Hook.Add("think", "midi_parse_pump", function()
         local state = MidiParser._parseState
         if not state then return end
-        local ok, val = coroutine.resume(state.co)
-        if not ok then
-            MidiParser._parseState = nil
-            if state.onError then pcall(state.onError, val) end
-        elseif coroutine.status(state.co) == "dead" then
-            MidiParser._parseState = nil
-            if state.onDone then pcall(state.onDone, val) end
+
+        for _ = 1, RESUMES_PER_FRAME do
+            local ok, val = coroutine.resume(state.co)
+            if not ok then
+                MidiParser._parseState = nil
+                if state.onError then pcall(state.onError, val) end
+                return
+            elseif coroutine.status(state.co) == "dead" then
+                MidiParser._parseState = nil
+                if state.onDone then pcall(state.onDone, val) end
+                return
+            end
         end
     end)
 end
