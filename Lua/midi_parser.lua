@@ -248,7 +248,15 @@ local function buildScore(allEvents, ticksPerQuarter)
     return score
 end
 
+MidiParser._cache = {}
+
 function MidiParser.parse(filePath)
+    if MidiParser._cache[filePath] then
+        MidiMod.Log("Cache hit: " .. filePath)
+        local cached = MidiParser._cache[filePath]
+        return cached.score, cached.header
+    end
+
     MidiMod.Log("Parsing MIDI file: " .. filePath)
 
     local file = io.open(filePath, "rb")
@@ -277,6 +285,8 @@ function MidiParser.parse(filePath)
 
     local score = buildScore(allEvents, header.ticksPerQuarter)
     MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
+
+    MidiParser._cache[filePath] = { score = score, header = header }
 
     return score, header
 end
