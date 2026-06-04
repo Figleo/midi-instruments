@@ -17,7 +17,8 @@ local wasHoldingInstrument = false
 
 local function refreshFileList()
     MGUI.midiFiles = {}
-    if MidiMod.MidiParser then
+    if MidiMod and MidiMod.MidiParser then
+        MidiMod.MidiParser.clearCache()
         local ok, files = pcall(MidiMod.MidiParser.listMidiFiles)
         if ok and files then
             MGUI.midiFiles = files

@@ -1,7 +1,7 @@
 -- Reads standard MIDI files and turns them into a simple note timeline.
 
 MidiMod = MidiMod or {}
-MidiMod.MidiParser = {}
+MidiMod.MidiParser = MidiMod.Midiparser or {}
 
 local MidiParser = MidiMod.MidiParser
 
@@ -249,6 +249,12 @@ local function buildScore(allEvents, ticksPerQuarter)
 end
 
 MidiParser._cache = {}
+
+function MidiParser.clearCache()
+    for k in pairs(MidiParser._cache) do
+        MidiParser._cache[k] = nil
+    end
+end
 
 function MidiParser.parse(filePath)
     if MidiParser._cache[filePath] then
