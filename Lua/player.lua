@@ -248,7 +248,7 @@ local function onThink()
     while Player.cursor <= #Player.score do
         local event = Player.score[Player.cursor]
         if event.timeMs <= elapsed then
-            local evType = event.type or "on"  -- backward compat: no type = noteOn
+            local evType = event.type or "on" -- backward compat: no type = noteOn
 
             if evType == "on" then
                 -- Note On
@@ -264,7 +264,7 @@ local function onThink()
                     pcall(MidiMod.SoundEngine.releaseNote, event.note, charID)
                 end
                 if Player.isStreamingHost then
-                    table.insert(streamBatch, event.note .. ",0")  -- velocity 0 = noteOff
+                    table.insert(streamBatch, event.note .. ",0") -- velocity 0 = noteOff
                 end
             end
 
@@ -333,6 +333,20 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     end
 
     local ch = Player.sourceCharacter
+
+    -- Stop if character is dead or unconscious (critical state)
+    local isDead, isUnconscious = false, false
+    pcall(function() isDead = ch.IsDead end)
+    pcall(function() isUnconscious = ch.IsUnconscious end)
+    if isDead or isUnconscious then
+        MidiMod.Log("Character incapacitated — stopping playback")
+        if MidiMod.Network then
+            pcall(MidiMod.Network.requestStop)
+        else
+            Player.stop()
+        end
+        return
+    end
 
     -- Update streaming tracker for our own character
     pcall(function()
