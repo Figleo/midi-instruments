@@ -1,5 +1,4 @@
 -- Sound Engine: Positional audio + Voice Stealing + Volume control
--- No muffle system — clean and lightweight.
 
 MidiMod                       = MidiMod or {}
 MidiMod.SoundEngine           = {}
@@ -36,7 +35,6 @@ SoundEngine.soundBanks        = {}
 SoundEngine.soundBankIdx      = {}
 SoundEngine.activeChannels    = {}
 SoundEngine.noteQueue         = {}
-SoundEngine.protectedChannels = {}
 SoundEngine.activeNoteUIDs    = {}
 SoundEngine.notesThisFrame    = 0
 SoundEngine.initialized       = false
@@ -48,7 +46,6 @@ local _loadDone          = false
 local _loadSamplesLoaded = 0
 local _loadObjectsLoaded = 0
 
-local _weAreSettingPitch = false
 
 local function noteToName(midiNote)
     local octave = math.floor(midiNote / 12) - 1
@@ -178,7 +175,6 @@ end
 
 local function safeDisposeChannelObject(ch, fade)
     if not ch then return end
-    SoundEngine.protectedChannels[ch] = nil
     if fade then
         pcall(function() ch.FadeOutAndDispose(0.02) end)
     else
@@ -286,13 +282,8 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
 
     if not channel then return nil end
 
-    -- Register for pitch protection
-    SoundEngine.protectedChannels[channel] = finalFreq
-
     -- Set pitch
-    _weAreSettingPitch = true
     pcall(function() channel.FrequencyMultiplier = finalFreq end)
-    _weAreSettingPitch = false
 
     if worldPos then
         pcall(function() channel.Near = SOUND_NEAR end)
@@ -308,7 +299,6 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         note       = midiNote,
         sampleNote = sampleNote,
         instrument = instrument,
-        freqMult   = finalFreq,
         baseGain   = baseGain,
         worldPos   = worldPos,
         charID     = charID
@@ -355,7 +345,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     return nil, nil
 end
 
--- Think Hook: cleanup + pitch protection + queue drain
+-- Think Hook: cleanup + queue drain
 
 Hook.Add("think", "midi_sound_tick", function()
     if not CLIENT then return end
@@ -365,13 +355,6 @@ Hook.Add("think", "midi_sound_tick", function()
     SoundEngine.notesThisFrame = 0
 
     cleanupDead()
-
-    -- Re-apply pitch every frame (protects against SPW and other mods)
-    for _, info in ipairs(SoundEngine.activeChannels) do
-        _weAreSettingPitch = true
-        pcall(function() info.channel.FrequencyMultiplier = info.freqMult end)
-        _weAreSettingPitch = false
-    end
 
     -- Drain note queue
     local played = 0
@@ -387,13 +370,6 @@ Hook.Add("think", "midi_sound_tick", function()
     end
 end)
 
--- SPW compatibility note:
--- We do NOT Hook.Patch set_FrequencyMultiplier because it fires on EVERY sound
--- channel in the game (including all SPW-managed sounds). The accumulated overhead
--- freezes the client and breaks the hosted-server pipe. The per-frame re-apply in
--- the think hook above is sufficient to maintain our pitch. OLD version used the
--- same approach and was stable with SPW.
-
 -- Release a note: gentle fade-out (noteOff from MIDI)
 -- Only stops the oldest instance of this note — allows overlapping same-note sounds
 local NOTE_RELEASE_FADE = 0.08  -- 80ms fade, smooth without clicks
@@ -403,7 +379,6 @@ function SoundEngine.releaseNote(midiNote, charID)
     for i = 1, #SoundEngine.activeChannels do
         local info = SoundEngine.activeChannels[i]
         if info.note == midiNote and (not charID or info.charID == charID) then
-            SoundEngine.protectedChannels[info.channel] = nil
             pcall(function() info.channel.FadeOutAndDispose(NOTE_RELEASE_FADE) end)
             table.remove(SoundEngine.activeChannels, i)
             break  -- only release one instance (oldest)
@@ -479,4 +454,4 @@ function SoundEngine.stopAllForChar(charID)
     end
 end
 
-MidiMod.Log("[SoundEngine] Loaded. Pitch protection via per-frame re-apply.")
+MidiMod.Log("[SoundEngine] Loaded.")
