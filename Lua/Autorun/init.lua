@@ -14,7 +14,7 @@ MidiMod.Version = "1.1.0"
 
 -- ====== SINGLE DEBUG TOGGLE ======
 -- Set to true to enable all debug logging across the entire mod.
-MidiMod.Debug = false
+MidiMod.Debug = true
 
 -- Client-side volume (loaded from companion mod XML settings)
 MidiMod.CurrentVolume = 0.75
@@ -111,7 +111,7 @@ end
 local function readVolumeFromXML()
     local volume = nil
     pcall(function()
-        local file = io.open("Data/Mods/MIDIInstruments/SettingsData.xml", "r")
+        local file = io.open("Data/Mods/MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_/SettingsData.xml", "r")
         if file then
             local content = file:read("*all")
             file:close()
