@@ -66,14 +66,14 @@ local function rebuildFileList(searchText)
             btn.CanBeFocused = true
 
             if isSelected then
-                btn.Color = Color(40, 80, 160, 210)
+                btn.Color = Color(255, 255, 255, 255)
             end
-            btn.HoverColor = Color(60, 110, 200, 220)
+            btn.HoverColor = Color(255, 255, 255, 255)
 
             pcall(function()
                 local tb = btn.GetChild(0)
                 if tb then
-                    tb.TextColor      = isSelected and Color(100, 200, 255) or Color(210, 210, 210)
+                    tb.TextColor      = isSelected and Color(120, 255, 200) or Color(210, 210, 210)
                     tb.HoverTextColor = Color(255, 255, 255)
                 end
             end)
@@ -81,6 +81,7 @@ local function rebuildFileList(searchText)
             local capturedPath = path
             btn.OnClicked = function()
                 MGUI.selectedFile = capturedPath
+                rebuildFileList(lastSearch)
                 return true
             end
         end
