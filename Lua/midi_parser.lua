@@ -1,23 +1,29 @@
-MidiMod = MidiMod or {}
+MidiMod            = MidiMod or {}
 MidiMod.MidiParser = MidiMod.Midiparser or {}
 
-local MidiParser = MidiMod.MidiParser
+local MidiParser   = MidiMod.MidiParser
+
+-- Cache stdlib lookups (saves 2 table lookups per call in MoonSharp)
+local sbyte        = string.byte
+local ssub         = string.sub
+local mfloor       = math.floor
+
 
 local function readBytes(data, pos, count)
-    return string.sub(data, pos, pos + count - 1), pos + count
+    return ssub(data, pos, pos + count - 1), pos + count
 end
 
 local function readUint8(data, pos)
-    return string.byte(data, pos), pos + 1
+    return sbyte(data, pos), pos + 1
 end
 
 local function readUint16(data, pos)
-    local b1, b2 = string.byte(data, pos, pos + 1)
+    local b1, b2 = sbyte(data, pos, pos + 1)
     return b1 * 256 + b2, pos + 2
 end
 
 local function readUint32(data, pos)
-    local b1, b2, b3, b4 = string.byte(data, pos, pos + 3)
+    local b1, b2, b3, b4 = sbyte(data, pos, pos + 3)
     return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4, pos + 4
 end
 
@@ -59,8 +65,6 @@ local function parseHeader(data, pos)
     }, pos
 end
 
-local YIELD_EVERY = 64
-
 local function parseTrack(data, pos, yieldFn)
     local chunk
     chunk, pos = readBytes(data, pos, 4)
@@ -73,16 +77,16 @@ local function parseTrack(data, pos, yieldFn)
     local trackEnd = pos + trackLen
 
     local events = {}
+    local evN = 0
     local absoluteTick = 0
     local runningStatus = 0
-    local loopCount = 0
 
     while pos < trackEnd do
         local delta
         delta, pos = readVarLen(data, pos)
         absoluteTick = absoluteTick + delta
 
-        local statusByte = string.byte(data, pos)
+        local statusByte = sbyte(data, pos)
 
         if statusByte >= 128 then
             runningStatus = statusByte
@@ -91,32 +95,33 @@ local function parseTrack(data, pos, yieldFn)
             statusByte = runningStatus
         end
 
-        local eventType = math.floor(statusByte / 16)
+        local eventType = mfloor(statusByte / 16)
         local channel = statusByte % 16
 
         if eventType == 0x9 then
             local note, velocity
             note, pos = readUint8(data, pos)
             velocity, pos = readUint8(data, pos)
-            local evType = velocity > 0 and "noteOn" or "noteOff"
-            table.insert(events, {
+            evN = evN + 1
+            events[evN] = {
                 tick = absoluteTick,
-                type = evType,
+                type = velocity > 0 and "noteOn" or "noteOff",
                 channel = channel,
                 note = note,
                 velocity = velocity,
-            })
+            }
         elseif eventType == 0x8 then
             local note, velocity
             note, pos = readUint8(data, pos)
             velocity, pos = readUint8(data, pos)
-            table.insert(events, {
+            evN = evN + 1
+            events[evN] = {
                 tick = absoluteTick,
                 type = "noteOff",
                 channel = channel,
                 note = note,
                 velocity = velocity,
-            })
+            }
         elseif eventType == 0xA then
             pos = pos + 2
         elseif eventType == 0xB then
@@ -134,14 +139,15 @@ local function parseTrack(data, pos, yieldFn)
             metaLen, pos = readVarLen(data, pos)
 
             if metaType == 0x51 then
-                local b1, b2, b3 = string.byte(data, pos, pos + 2)
+                local b1, b2, b3 = sbyte(data, pos, pos + 2)
                 local usPerQuarter = b1 * 65536 + b2 * 256 + b3
-                table.insert(events, {
+                evN = evN + 1
+                events[evN] = {
                     tick = absoluteTick,
                     type = "tempo",
                     usPerQuarter = usPerQuarter,
-                    bpm = math.floor(60000000 / usPerQuarter + 0.5),
-                })
+                    bpm = mfloor(60000000 / usPerQuarter + 0.5),
+                }
             elseif metaType == 0x2F then
                 pos = pos + metaLen
                 break
@@ -156,12 +162,7 @@ local function parseTrack(data, pos, yieldFn)
             break
         end
 
-        if yieldFn then
-            loopCount = loopCount + 1
-            if loopCount % YIELD_EVERY == 0 then
-                yieldFn()
-            end
-        end
+        if yieldFn then yieldFn() end
     end
 
     return events, math.max(pos, trackEnd)
@@ -170,112 +171,93 @@ end
 -- Event ordering: tick ascending; at same tick: tempo > noteOff > noteOn.
 local function evLess(a, b)
     if a.tick ~= b.tick then return a.tick < b.tick end
-    if a.type == "tempo"   and b.type ~= "tempo"   then return true  end
-    if b.type == "tempo"   and a.type ~= "tempo"   then return false end
-    if a.type == "noteOff" and b.type == "noteOn"  then return true  end
-    if a.type == "noteOn"  and b.type == "noteOff" then return false end
+    if a.type == "tempo" and b.type ~= "tempo" then return true end
+    if b.type == "tempo" and a.type ~= "tempo" then return false end
+    if a.type == "noteOff" and b.type == "noteOn" then return true end
+    if a.type == "noteOn" and b.type == "noteOff" then return false end
     return false
 end
 
-local function mergeTracks(tracks, yieldFn)
+local function mergeTracks(tracks)
     if #tracks == 1 then return tracks[1] end
 
-    local k       = #tracks
-    local indices = {}
-    for i = 1, k do indices[i] = 1 end
-
+    -- Flatten all tracks into a single array, then sort.
+    -- table.sort is C-implemented and vastly faster than a Lua k-way merge.
     local result = {}
-    local count  = 0
-
-    while true do
-        local bestI, bestEv
-        for i = 1, k do
-            local ev = tracks[i][indices[i]]
-            if ev and (not bestEv or evLess(ev, bestEv)) then
-                bestEv = ev
-                bestI  = i
-            end
-        end
-        if not bestI then break end
-
-        count          = count + 1
-        result[count]  = bestEv
-        indices[bestI] = indices[bestI] + 1
-
-        if yieldFn and count % YIELD_EVERY == 0 then
-            yieldFn()
+    local n = 0
+    for i = 1, #tracks do
+        local t = tracks[i]
+        for j = 1, #t do
+            n = n + 1
+            result[n] = t[j]
         end
     end
 
+    table.sort(result, evLess)
     return result
 end
 
-local function buildScore(tracks, ticksPerQuarter, yieldFn)
-    local allEvents = mergeTracks(tracks, yieldFn)
-    if yieldFn then yieldFn() end
-
+local function buildScore(allEvents, ticksPerQuarter, yieldFn)
     local tempo = 500000
     local lastTick = 0
     local lastTimeMs = 0
+    local score = {}
+    local scoreN = 0
+    local activeNotes = {}
 
     for _, ev in ipairs(allEvents) do
         local deltaTicks = ev.tick - lastTick
         local deltaMs = (deltaTicks / ticksPerQuarter) * (tempo / 1000)
         lastTimeMs = lastTimeMs + deltaMs
         lastTick = ev.tick
-        ev.timeMs = lastTimeMs
 
         if ev.type == "tempo" then
             tempo = ev.usPerQuarter
-        end
-    end
-
-    if yieldFn then yieldFn() end
-
-    local score = {}
-    local activeNotes = {}
-
-    for _, ev in ipairs(allEvents) do
-        if ev.type == "noteOn" then
-            local key = ev.channel .. "_" .. ev.note
+        elseif ev.type == "noteOn" then
+            local key = ev.channel * 128 + ev.note
             if activeNotes[key] then
-                table.insert(score, {
-                    timeMs = ev.timeMs,
+                scoreN = scoreN + 1
+                score[scoreN] = {
+                    timeMs = lastTimeMs,
                     type = "off",
                     note = ev.note,
                     channel = ev.channel,
-                })
+                }
             end
-            activeNotes[key] = ev.timeMs
-            table.insert(score, {
-                timeMs = ev.timeMs,
+            activeNotes[key] = lastTimeMs
+            scoreN = scoreN + 1
+            score[scoreN] = {
+                timeMs = lastTimeMs,
                 type = "on",
                 note = ev.note,
                 velocity = ev.velocity,
                 channel = ev.channel,
-            })
+            }
         elseif ev.type == "noteOff" then
-            local key = ev.channel .. "_" .. ev.note
+            local key = ev.channel * 128 + ev.note
             if activeNotes[key] then
-                table.insert(score, {
-                    timeMs = ev.timeMs,
+                scoreN = scoreN + 1
+                score[scoreN] = {
+                    timeMs = lastTimeMs,
                     type = "off",
                     note = ev.note,
                     channel = ev.channel,
-                })
+                }
                 activeNotes[key] = nil
             end
         end
+
+        if yieldFn then yieldFn() end
     end
 
     for key, startTime in pairs(activeNotes) do
-        local ch, noteStr = string.match(key, "(%d+)_(%d+)")
-        table.insert(score, {
+        scoreN = scoreN + 1
+        score[scoreN] = {
             timeMs = startTime + 200,
             type = "off",
-            note = tonumber(noteStr),
-            channel = tonumber(ch),
-        })
+            note = key % 128,
+            channel = mfloor(key / 128),
+        }
     end
 
     return score
@@ -318,7 +300,8 @@ function MidiParser.parse(filePath)
         tracks[i], pos = parseTrack(data, pos)
     end
 
-    local score = buildScore(tracks, header.ticksPerQuarter)
+    local allEvents = mergeTracks(tracks)
+    local score     = buildScore(allEvents, header.ticksPerQuarter)
     MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
 
     MidiParser._cache[filePath] = { score = score, header = header }
@@ -332,10 +315,36 @@ function MidiParser.cancelAsync()
     MidiParser._parseState = nil
 end
 
-local RESUMES_PER_FRAME = 16
+-- Time budget per frame for async parse pump (seconds).
+local FRAME_BUDGET_SEC = 0.004
 
 function MidiParser.parseAsync(filePath, onDone, onError)
     MidiParser._parseState = nil
+
+    -- Check cache first — instant callback, no coroutine needed
+    if MidiParser._cache[filePath] then
+        MidiMod.Log("Async cache hit: " .. filePath)
+        if onDone then pcall(onDone, MidiParser._cache[filePath].score) end
+        return
+    end
+
+    -- Shared deadline set by the pump before each resume.
+    local deadline = 0
+
+    -- Each phase gets its own yielder to avoid double-throttling.
+    -- os.clock() is a C# interop call — interval controls how often we check.
+    local function makeYielder(interval)
+        local counter = 0
+        return function()
+            counter = counter + 1
+            if counter >= interval then
+                counter = 0
+                if os.clock() >= deadline then
+                    coroutine.yield()
+                end
+            end
+        end
+    end
 
     local co = coroutine.create(function()
         local file = io.open(filePath, "rb")
@@ -354,23 +363,37 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         local header
         header, pos = parseHeader(data, pos)
 
+        local yieldTrack = makeYielder(200)
+
         local tracks = {}
         for i = 1, header.trackCount do
-            tracks[i], pos = parseTrack(data, pos, coroutine.yield)
+            tracks[i], pos = parseTrack(data, pos, yieldTrack)
             coroutine.yield()
         end
 
-        local score = buildScore(tracks, header.ticksPerQuarter, coroutine.yield)
+        -- Flatten + C-sort is far faster than Lua k-way merge
+        local allEvents = mergeTracks(tracks)
+        coroutine.yield()
+
+        local yieldScore = makeYielder(200)
+        local score = buildScore(allEvents, header.ticksPerQuarter, yieldScore)
         MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
+
+        -- Cache the result
+        MidiParser._cache[filePath] = { score = score, header = header }
+
         return score
     end)
 
     MidiParser._parseState = {
-        co      = co,
-        onDone  = onDone,
-        onError = onError,
+        co       = co,
+        onDone   = onDone,
+        onError  = onError,
+        deadline = function(d) deadline = d end,
     }
 
+    -- Kick off the first resume (reads file, then yields)
+    deadline = os.clock() + FRAME_BUDGET_SEC
     local ok, val = coroutine.resume(co)
     if not ok then
         MidiParser._parseState = nil
@@ -386,7 +409,11 @@ if CLIENT then
         local state = MidiParser._parseState
         if not state then return end
 
-        for _ = 1, RESUMES_PER_FRAME do
+        local dl = os.clock() + FRAME_BUDGET_SEC
+        state.deadline(dl)
+
+        -- Loop: resume multiple times within budget instead of once per frame
+        while true do
             local ok, val = coroutine.resume(state.co)
             if not ok then
                 MidiParser._parseState = nil
@@ -397,6 +424,8 @@ if CLIENT then
                 if state.onDone then pcall(state.onDone, val) end
                 return
             end
+            -- If we still have budget, resume again immediately
+            if os.clock() >= dl then break end
         end
     end)
 end
