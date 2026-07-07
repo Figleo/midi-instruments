@@ -352,7 +352,10 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     -- ── Update status label only ───────────────────────────────────────────────
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
-            if MidiMod.Player.playing then
+            if MidiMod.MidiParser and MidiMod.MidiParser._parseState then
+                statusLabel.Text      = "Loading...  |  F5 to hide"
+                statusLabel.TextColor = Color(255, 200, 50)
+            elseif MidiMod.Player.playing then
                 statusLabel.Text      = "♪ Playing...  |  F5 to hide"
                 statusLabel.TextColor = Color(100, 255, 140)
                 if MGUI.nowPlayingLabel and MidiMod.Player.currentFile then

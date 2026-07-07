@@ -52,6 +52,19 @@ function Player.loadFile(filePath)
     return true
 end
 
+function Player.loadScore(score, filePath)
+    Player.stop()
+    if not score or #score == 0 then
+        MidiMod.Log("MIDI has no notes: " .. tostring(filePath))
+        return false
+    end
+    Player.score = score
+    Player.cursor = 1
+    Player.currentFile = filePath
+    MidiMod.Log("Loaded MIDI: " .. #score .. " notes from " .. tostring(filePath))
+    return true
+end
+
 -- Time
 
 local function getTimeMs()
