@@ -8,9 +8,23 @@ if string.sub(basePath, -1) ~= "/" and string.sub(basePath, -1) ~= "\\" then
     basePath = basePath .. "/"
 end
 
+local function readVersionFromXML()
+    local version = "Unknown"
+    pcall(function()
+        local file = io.open(basePath .. "filelist.xml", "r")
+        if file then
+            local content = file:read("*all")
+            file:close()
+            local versionStr = string.match(content, 'modversion="([^"]+)"')
+            if versionStr then version = versionStr end
+        end
+    end)
+    return version
+end
+
 MidiMod = MidiMod or {}
 MidiMod.BasePath = basePath
-MidiMod.Version = "1.1.0"
+MidiMod.Version = readVersionFromXML()
 
 -- ====== SINGLE DEBUG TOGGLE ======
 -- Set to true to enable all debug logging across the entire mod.
@@ -68,6 +82,7 @@ end
 
 MidiMod.IsHoldingAccordion = MidiMod.IsHoldingInstrument
 
+MidiMod.Log("=== MIDI Instruments v" .. MidiMod.Version .. " ===")
 MidiMod.Log("Base path: " .. MidiMod.BasePath)
 
 local function safeRequire(modName)
