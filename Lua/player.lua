@@ -21,7 +21,18 @@ Player.isStreamingHost     = false
 Player.instrumentDropped   = false
 Player.streamingCharacters = {} -- tracks remote players streaming to us
 
--- MIDI Loading
+local pcall                = pcall
+local ipairs               = ipairs
+local pairs                = pairs
+local math_max             = math.max
+local math_min             = math.min
+local math_floor           = math.floor
+local os_clock             = os.clock
+local tinsert              = table.insert
+local tconcat              = table.concat
+local string_format        = string.format
+
+-- ─── MIDI Loading ───
 
 function Player.loadFile(filePath)
     Player.stop()
@@ -65,16 +76,16 @@ function Player.loadScore(score, filePath)
     return true
 end
 
--- Time
+-- ─── Time ───
 
 local function getTimeMs()
     if Timing and Timing.TotalTime then
         return Timing.TotalTime * 1000
     end
-    return os.clock() * 1000
+    return os_clock() * 1000
 end
 
--- Transport Controls
+-- ─── Transport Controls ───
 
 function Player.play(character)
     if not Player.score or #Player.score == 0 then
@@ -138,7 +149,6 @@ function Player.stop()
 end
 
 -- Per-player stop: for network, stops sounds from a specific remote character
--- Per-player stop: for network, stops sounds from a specific remote character
 function Player.stopChar(charID)
     -- If this is our own character, do a full stop
     if Player.sourceCharacter then
@@ -155,7 +165,7 @@ function Player.stopChar(charID)
         MidiMod.SoundEngine.stopAllForChar(charID)
     end
 
-    -- Очисти трекинг нот для этого персонажа
+    -- Clear note tracking for this character
     if MidiMod.SoundEngine and MidiMod.SoundEngine.activeNoteUIDs then
         MidiMod.SoundEngine.activeNoteUIDs[charID] = nil
     end
@@ -164,7 +174,7 @@ function Player.stopChar(charID)
 end
 
 function Player.setTempo(multiplier)
-    Player.tempoMultiplier = math.max(0.25, math.min(4.0, multiplier))
+    Player.tempoMultiplier = math_max(0.25, math_min(4.0, multiplier))
 end
 
 function Player.getProgress()
@@ -176,19 +186,19 @@ function Player.getTimeString()
     if not Player.playing then return "0:00 / 0:00" end
 
     local elapsed = (getTimeMs() - Player.startTime) * Player.tempoMultiplier
-    local total = Player.score[#Player.score].timeMs
+    local total   = Player.score[#Player.score].timeMs
 
     local function formatTime(ms)
-        local s = math.floor(ms / 1000)
-        local m = math.floor(s / 60)
+        local s = math_floor(ms / 1000)
+        local m = math_floor(s / 60)
         s = s % 60
-        return string.format("%d:%02d", m, s)
+        return string_format("%d:%02d", m, s)
     end
 
     return formatTime(elapsed) .. " / " .. formatTime(total)
 end
 
--- === AIM: Hold instrument via forced RMB input ===
+-- ─── AIM: Hold instrument via forced RMB input ───
 -- Suppressed when LMB is used on an interactable target
 
 local inputAim = nil
@@ -217,7 +227,7 @@ local function forceAim(character)
     pcall(function() isDead = character.IsDead end)
     if isDead then return end
 
-    local now = os.clock()
+    local now = os_clock()
 
     local lmbHeld = false
     pcall(function() lmbHeld = PlayerInput.PrimaryMouseButtonHeld() end)
@@ -235,7 +245,7 @@ local function forceAim(character)
     end)
 end
 
--- === Note Playback Logic ===
+-- ─── Note Playback Logic ───
 
 local function onThink()
     if not Player.playing or Player.paused then return end
@@ -258,45 +268,49 @@ local function onThink()
     local charID = nil
     pcall(function() charID = Player.sourceCharacter.ID end)
 
-    while Player.cursor <= #Player.score do
-        local event = Player.score[Player.cursor]
+    local score = Player.score
+    local cursor = Player.cursor
+    local scoreLen = #score
+
+    while cursor <= scoreLen do
+        local event = score[cursor]
         if event.timeMs <= elapsed then
-            local evType = event.type or "on" -- backward compat: no type = noteOn
+            local evType = event.type or "on"
 
             if evType == "on" then
-                -- Note On
                 if MidiMod.SoundEngine then
                     pcall(MidiMod.SoundEngine.playNote, event.note, event.velocity, worldPos, currentInst, charID)
                 end
                 if Player.isStreamingHost then
-                    table.insert(streamBatch, event.note .. "," .. event.velocity)
+                    tinsert(streamBatch, event.note .. "," .. event.velocity)
                 end
             elseif evType == "off" then
-                -- Note Off — smooth fade-out
                 if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
                     pcall(MidiMod.SoundEngine.releaseNote, event.note, charID)
                 end
                 if Player.isStreamingHost then
-                    table.insert(streamBatch, event.note .. ",0") -- velocity 0 = noteOff
+                    tinsert(streamBatch, event.note .. ",0")
                 end
             end
 
-            Player.cursor = Player.cursor + 1
+            cursor = cursor + 1
         else
             break
         end
     end
 
+    Player.cursor = cursor
+
     -- Send notes to other players
     if Player.isStreamingHost and #streamBatch > 0 and Player.sourceCharacter then
-        local notesStr = table.concat(streamBatch, ";")
+        local notesStr = tconcat(streamBatch, ";")
         if MidiMod.Network and MidiMod.Network.broadcastNotes then
             pcall(MidiMod.Network.broadcastNotes, charID, notesStr, currentInst)
         end
     end
 
     -- Song finished
-    if Player.cursor > #Player.score then
+    if cursor > scoreLen then
         MidiMod.Log("Playback complete")
         local wasStreaming = Player.isStreamingHost
         Player.playing = false
@@ -313,7 +327,7 @@ local function onThink()
     end
 end
 
--- === Injection Points ===
+-- ─── Injection Points ───
 
 -- ControlLocalPlayer fires every C# frame — most reliable for aim forcing
 pcall(function()
@@ -332,7 +346,7 @@ end)
 
 -- Think hook: note playback + streaming tracker cleanup + aim backup
 Hook.Add("think", "MidiMod.Player.Think", function()
-    local clockNow = os.clock()
+    local clockNow = os_clock()
 
     -- Clean up stale streaming entries (remote players who stopped)
     for charID, lastUpdate in pairs(Player.streamingCharacters) do
@@ -387,7 +401,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     onThink()
 end)
 
--- === BUFF SYSTEM (Server-side affliction application) ===
+-- ─── BUFF SYSTEM (Server-side affliction application) ───
 
 local TALENT_BUFFS      = {
     steadytune     = "psychosisimmunity",
@@ -408,9 +422,10 @@ local function hasTalentChar(character, talentID)
     if not found then
         pcall(function()
             if character.Info and character.Info.UnlockedTalents then
-                for id in character.Info.UnlockedTalents do
+                for _, id in pairs(character.Info.UnlockedTalents) do
                     if tostring(id):lower() == talentID then
                         found = true
+                        break
                     end
                 end
             end
@@ -440,7 +455,7 @@ local function applyAffliction(character, afflictionID, strength)
     -- This prevents generating unnecessary server entity events
     local current = getAfflictionStrength(character, afflictionID)
     if current >= strength * 0.5 then
-        MidiMod.DebugLog(string.format(
+        MidiMod.DebugLog(string_format(
             "[ServerBuff] Skipping %s (current=%.1f, threshold=%.1f)",
             afflictionID, current, strength * 0.5))
         return
@@ -477,7 +492,7 @@ if SERVER then
         end)
 
     Hook.Add("think", "MidiMod.Server.BuffApply", function(deltaTime)
-        _serverTime = _serverTime + deltaTime
+        _serverTime = _serverTime + (deltaTime or 0)
         local now = _serverTime
 
         for charID, timer in pairs(serverTimers) do
@@ -494,7 +509,7 @@ if SERVER then
                     for talentID, afflictionID in pairs(TALENT_BUFFS) do
                         if hasTalentChar(character, talentID) then
                             applyAffliction(character, afflictionID, BUFF_STRENGTH)
-                            MidiMod.DebugLog(string.format(
+                            MidiMod.DebugLog(string_format(
                                 "[ServerBuff] Applied %s to char %d",
                                 afflictionID, charID))
                         end

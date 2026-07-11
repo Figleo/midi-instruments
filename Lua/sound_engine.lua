@@ -1,56 +1,73 @@
 -- Sound Engine: Positional audio + Voice Stealing + Volume control
 
-MidiMod                       = MidiMod or {}
-MidiMod.SoundEngine           = {}
+MidiMod               = MidiMod or {}
+MidiMod.SoundEngine   = {}
 
-local SoundEngine             = MidiMod.SoundEngine
+local SoundEngine     = MidiMod.SoundEngine
 
-local NOTE_NAMES              = {
+local NOTE_NAMES      = {
     "C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"
 }
 
-local SAMPLE_MIN              = 24
-local SAMPLE_MAX              = 107
-local MAX_POLYPHONY           = 16
-local MAX_PER_SAMPLE          = 4
-local POOL_SIZE               = 2
-local MAX_NEW_PER_FRAME       = 12
-local LOAD_PER_FRAME          = 8
-local SOUND_RANGE             = 1000.0
-local SOUND_NEAR              = 35.0
+-- Precompute all 128 MIDI note names to avoid string churn at runtime
+local NOTE_NAME_CACHE = {}
+for note = 0, 127 do
+    local octave = math.floor(note / 12) - 1
+    NOTE_NAME_CACHE[note] = NOTE_NAMES[(note % 12) + 1] .. octave
+end
 
-local FREQ_MIN                = 0.25
-local FREQ_MAX                = 4.0
+local string_format        = string.format
+local SAMPLE_MIN           = 24
+local SAMPLE_MAX           = 107
+local MAX_POLYPHONY        = 16
+local MAX_PER_SAMPLE       = 4
+local POOL_SIZE            = 2
+local MAX_NEW_PER_FRAME    = 12
+local LOAD_PER_FRAME       = 8
+local SOUND_RANGE          = 1000.0
+local SOUND_NEAR           = 35.0
+
+local FREQ_MIN             = 0.25
+local FREQ_MAX             = 4.0
 
 -- stopAll re-entry and debounce guards
-local _isStopping             = false
-local _lastStopAllTime        = 0
-local STOP_ALL_DEBOUNCE_MS    = 50
+local _isStopping          = false
+local _lastStopAllTime     = 0
+local STOP_ALL_DEBOUNCE_MS = 50
 
 -- cleanupDead throttle
-local _lastCleanupTime        = 0
-local CLEANUP_THROTTLE_MS     = 30
+local _lastCleanupTime     = 0
+local CLEANUP_THROTTLE_MS  = 30
 
-SoundEngine.soundBanks        = {}
-SoundEngine.soundBankIdx      = {}
-SoundEngine.activeChannels    = {}
-SoundEngine.noteQueue         = {}
-SoundEngine.activeNoteUIDs    = {}
-SoundEngine.notesThisFrame    = 0
-SoundEngine.initialized       = false
-
+SoundEngine.soundBanks     = {}
+SoundEngine.soundBankIdx   = {}
+SoundEngine.activeChannels = {}
+SoundEngine.noteQueue      = {}
+SoundEngine.activeNoteUIDs = {}
+SoundEngine.notesThisFrame = 0
+SoundEngine.initialized    = false
 
 -- Chunked loading state
-local _loadQueue         = nil
-local _loadDone          = false
-local _loadSamplesLoaded = 0
-local _loadObjectsLoaded = 0
+local _loadQueue           = nil
+local _loadDone            = false
+local _loadSamplesLoaded   = 0
+local _loadObjectsLoaded   = 0
 
+local pcall                = pcall
+local ipairs               = ipairs
+local pairs                = pairs
+local math_max             = math.max
+local math_min             = math.min
+local math_floor           = math.floor
+local math_abs             = math.abs
+local os_clock             = os.clock
+local tinsert              = table.insert
+local tremove              = table.remove
+
+-- ─── Helpers ───
 
 local function noteToName(midiNote)
-    local octave = math.floor(midiNote / 12) - 1
-    local noteIndex = (midiNote % 12) + 1
-    return NOTE_NAMES[noteIndex] .. octave
+    return NOTE_NAME_CACHE[midiNote] or "C-1"
 end
 
 local _channelUidCounter = 0
@@ -60,7 +77,8 @@ local function nextUID()
     return _channelUidCounter
 end
 
--- Begin chunked loading — call once, then pump via think hook
+-- ─── Chunked Loading ───
+
 function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
 
@@ -71,15 +89,15 @@ function SoundEngine.init()
         SoundEngine.soundBanks[inst]   = {}
         SoundEngine.soundBankIdx[inst] = {}
 
-        local soundDir                 = MidiMod.BasePath .. "Sounds/" .. inst .. "_notes/"
+        local soundDir                 = (MidiMod.BasePath or "") .. "Sounds/" .. inst .. "_notes/"
         for noteNum = SAMPLE_MIN, SAMPLE_MAX do
             local name = noteToName(noteNum)
             local path = soundDir .. inst .. "_" .. name .. ".ogg"
-            table.insert(_loadQueue, { inst = inst, noteNum = noteNum, path = path })
+            tinsert(_loadQueue, { inst = inst, noteNum = noteNum, path = path })
         end
     end
 
-    MidiMod.Log(string.format("[SoundEngine] Chunked load started: %d jobs across %d instruments.",
+    MidiMod.Log(string_format("[SoundEngine] Chunked load started: %d jobs across %d instruments.",
         #_loadQueue, #instruments))
 end
 
@@ -89,7 +107,7 @@ local function pumpLoadQueue()
 
     local processed = 0
     while #_loadQueue > 0 and processed < LOAD_PER_FRAME do
-        local job = table.remove(_loadQueue, 1)
+        local job = tremove(_loadQueue, 1)
         processed = processed + 1
 
         local fileExists = false
@@ -147,25 +165,25 @@ end
 local function findClosestSample(midiNote, bank)
     if bank[midiNote] then return midiNote, 1.0 end
 
-    local clamped = math.max(SAMPLE_MIN, math.min(SAMPLE_MAX, midiNote))
+    local clamped = math_max(SAMPLE_MIN, math_min(SAMPLE_MAX, midiNote))
     if bank[clamped] then
         return clamped, 2 ^ ((midiNote - clamped) / 12)
     end
 
     for offset = 1, 127 do
         local above = clamped + offset
-        if bank[above] then
+        if above <= SAMPLE_MAX and bank[above] then
             return above, 2 ^ ((midiNote - above) / 12)
         end
         local below = clamped - offset
-        if bank[below] then
+        if below >= SAMPLE_MIN and bank[below] then
             return below, 2 ^ ((midiNote - below) / 12)
         end
     end
     return nil, 1.0
 end
 
--- Channel lifecycle helpers
+-- ─── Channel lifecycle ───
 
 local function safeAlive(ch)
     if not ch then return false end
@@ -187,7 +205,7 @@ local function removeChannelAt(idx, fade)
     if info then
         safeDisposeChannelObject(info.channel, fade)
     end
-    table.remove(SoundEngine.activeChannels, idx)
+    tremove(SoundEngine.activeChannels, idx)
 end
 
 local function fadeDisposeChannel(idx)
@@ -215,7 +233,7 @@ local function voiceSteal(sampleNote, instrument)
 end
 
 local function cleanupDead()
-    local now = os.clock() * 1000
+    local now = os_clock() * 1000
     if (now - _lastCleanupTime) < CLEANUP_THROTTLE_MS then return end
     _lastCleanupTime = now
 
@@ -232,7 +250,7 @@ local function evictOldest()
     end
 end
 
--- Play Note (charID is optional, used for per-player stop)
+-- ─── Play Note ───
 
 local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local bank = SoundEngine.soundBanks[instrument]
@@ -244,13 +262,9 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local sampleNote, freqMult = findClosestSample(midiNote, bank)
     if not sampleNote then return nil end
 
-    local finalFreq = math.max(FREQ_MIN, math.min(FREQ_MAX, freqMult))
-
     -- Skip notes that would need extreme retuning
     if freqMult < FREQ_MIN or freqMult > FREQ_MAX then
-        if math.abs(freqMult - finalFreq) > 0.05 then
-            return nil
-        end
+        return nil
     end
 
     cleanupDead()
@@ -262,7 +276,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
 
     -- Volume: velocity scaled by user volume setting
     local volumeMult = MidiMod.CurrentVolume or 1.0
-    local baseGain = math.min(1.0, (velocity / 127)) * volumeMult
+    local baseGain = math_min(1.0, (velocity / 127)) * volumeMult
 
     local channel = nil
 
@@ -283,7 +297,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     if not channel then return nil end
 
     -- Set pitch
-    pcall(function() channel.FrequencyMultiplier = finalFreq end)
+    pcall(function() channel.FrequencyMultiplier = freqMult end)
 
     if worldPos then
         pcall(function() channel.Near = SOUND_NEAR end)
@@ -291,9 +305,9 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         pcall(function() channel.Position = Vector3(worldPos.X, worldPos.Y, 0) end)
     end
 
-    local uid = nextUID() -- используем глобальный счётчик
+    local uid = nextUID()
 
-    table.insert(SoundEngine.activeChannels, {
+    tinsert(SoundEngine.activeChannels, {
         uid        = uid,
         channel    = channel,
         note       = midiNote,
@@ -304,7 +318,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         charID     = charID
     })
 
-    -- Сохрани uid в трекинг
+    -- Store UID in tracking table
     if charID then
         if not SoundEngine.activeNoteUIDs[charID] then
             SoundEngine.activeNoteUIDs[charID] = {}
@@ -322,19 +336,18 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     -- Deduplicate: if same note already queued, just keep highest velocity
     for _, queued in ipairs(SoundEngine.noteQueue) do
         if queued.midiNote == midiNote and queued.instrument == instrument then
-            queued.velocity = math.max(queued.velocity, velocity)
+            queued.velocity = math_max(queued.velocity, velocity)
             return nil
         end
     end
 
     if SoundEngine.notesThisFrame < MAX_NEW_PER_FRAME then
         SoundEngine.notesThisFrame = SoundEngine.notesThisFrame + 1
-        local ch, uid = doPlayNote(midiNote, velocity, worldPos, instrument, charID)
-        return ch, uid -- ← пробросить uid наружу
+        return doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     end
 
     if #SoundEngine.noteQueue < 64 then
-        table.insert(SoundEngine.noteQueue, {
+        tinsert(SoundEngine.noteQueue, {
             midiNote   = midiNote,
             velocity   = velocity,
             worldPos   = worldPos,
@@ -345,7 +358,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     return nil, nil
 end
 
--- Think Hook: cleanup + queue drain
+-- ─── Think Hook ───
 
 Hook.Add("think", "midi_sound_tick", function()
     if not CLIENT then return end
@@ -359,29 +372,38 @@ Hook.Add("think", "midi_sound_tick", function()
     -- Drain note queue
     local played = 0
     while #SoundEngine.noteQueue > 0 and played < MAX_NEW_PER_FRAME do
-        local entry = table.remove(SoundEngine.noteQueue, 1)
+        local entry = tremove(SoundEngine.noteQueue, 1)
         doPlayNote(entry.midiNote, entry.velocity, entry.worldPos, entry.instrument, entry.charID)
         played = played + 1
     end
 
     -- Cap queue size to prevent unbounded growth
     while #SoundEngine.noteQueue > 48 do
-        table.remove(SoundEngine.noteQueue, 1)
+        tremove(SoundEngine.noteQueue, 1)
     end
 end)
 
+-- ─── Note Release / Stop ───
+
 -- Release a note: gentle fade-out (noteOff from MIDI)
 -- Only stops the oldest instance of this note — allows overlapping same-note sounds
-local NOTE_RELEASE_FADE = 0.08  -- 80ms fade, smooth without clicks
+local NOTE_RELEASE_FADE = 0.08 -- 80ms fade, smooth without clicks
 
 function SoundEngine.releaseNote(midiNote, charID)
-    -- Check active channels for this note
+    -- If we have a tracked UID for this char+note, try to find and release that exact channel
+    local targetUID = nil
+    if charID and SoundEngine.activeNoteUIDs[charID] then
+        targetUID = SoundEngine.activeNoteUIDs[charID][midiNote]
+    end
+
     for i = 1, #SoundEngine.activeChannels do
         local info = SoundEngine.activeChannels[i]
         if info.note == midiNote and (not charID or info.charID == charID) then
-            pcall(function() info.channel.FadeOutAndDispose(NOTE_RELEASE_FADE) end)
-            table.remove(SoundEngine.activeChannels, i)
-            break  -- only release one instance (oldest)
+            if not targetUID or info.uid == targetUID then
+                pcall(function() info.channel.FadeOutAndDispose(NOTE_RELEASE_FADE) end)
+                tremove(SoundEngine.activeChannels, i)
+                break -- only release one instance (oldest or exact match)
+            end
         end
     end
 
@@ -391,30 +413,29 @@ function SoundEngine.releaseNote(midiNote, charID)
     end
 end
 
--- Stop a specific note (hard kill, all instances)
+-- Stop a specific note (hard kill, all instances or exact UID match)
 function SoundEngine.stopNote(midiNote, charID, uid)
-    -- Убрать из очереди
+    -- Remove from queue
     for i = #SoundEngine.noteQueue, 1, -1 do
         if SoundEngine.noteQueue[i].midiNote == midiNote then
             if not charID or SoundEngine.noteQueue[i].charID == charID then
-                table.remove(SoundEngine.noteQueue, i)
+                tremove(SoundEngine.noteQueue, i)
             end
         end
     end
 
-    -- Убрать из активных каналов
+    -- Remove from active channels
     for i = #SoundEngine.activeChannels, 1, -1 do
         local info = SoundEngine.activeChannels[i]
         if info.note == midiNote and (not charID or info.charID == charID) then
-            -- Если uid передан — убиваем только точный канал
-            -- Если нет — убиваем все каналы этой ноты (старое поведение)
+            -- If UID passed, kill only that exact channel; otherwise kill all matches
             if uid == nil or info.uid == uid then
                 fadeDisposeChannel(i)
             end
         end
     end
 
-    -- Очисти из трекинга
+    -- Clear from tracking
     if charID and SoundEngine.activeNoteUIDs[charID] then
         SoundEngine.activeNoteUIDs[charID][midiNote] = nil
     end
@@ -424,7 +445,7 @@ end
 function SoundEngine.stopAll()
     if _isStopping then return end
 
-    local now = os.clock() * 1000
+    local now = os_clock() * 1000
     if (now - _lastStopAllTime) < STOP_ALL_DEBOUNCE_MS then return end
     _lastStopAllTime = now
 
@@ -443,7 +464,7 @@ function SoundEngine.stopAllForChar(charID)
 
     for i = #SoundEngine.noteQueue, 1, -1 do
         if SoundEngine.noteQueue[i].charID == charID then
-            table.remove(SoundEngine.noteQueue, i)
+            tremove(SoundEngine.noteQueue, i)
         end
     end
 
@@ -452,6 +473,9 @@ function SoundEngine.stopAllForChar(charID)
             fadeDisposeChannel(i)
         end
     end
+
+    -- Wipe tracking table for this character to prevent memory leaks
+    SoundEngine.activeNoteUIDs[charID] = nil
 end
 
 MidiMod.Log("[SoundEngine] Loaded.")

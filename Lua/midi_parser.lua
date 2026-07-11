@@ -1,5 +1,5 @@
 MidiMod            = MidiMod or {}
-MidiMod.MidiParser = MidiMod.Midiparser or {}
+MidiMod.MidiParser = MidiMod.MidiParser or {}
 
 local MidiParser   = MidiMod.MidiParser
 
@@ -7,7 +7,20 @@ local MidiParser   = MidiMod.MidiParser
 local sbyte        = string.byte
 local ssub         = string.sub
 local mfloor       = math.floor
+local tinsert      = table.insert
+local tsort        = table.sort
+local ipairs       = ipairs
+local pairs        = pairs
+local type         = type
+local tonumber     = tonumber
+local tostring     = tostring
+local error        = error
+local io_open      = io.open
+local coroutine    = coroutine
+local os_clock     = os.clock
+local math_max     = math.max
 
+-- ─── Binary helpers ───
 
 local function readBytes(data, pos, count)
     return ssub(data, pos, pos + count - 1), pos + count
@@ -37,6 +50,8 @@ local function readVarLen(data, pos)
     return value, pos
 end
 
+-- ─── Header / Track ───
+
 local function parseHeader(data, pos)
     local chunk
     chunk, pos = readBytes(data, pos, 4)
@@ -51,6 +66,10 @@ local function parseHeader(data, pos)
     format, pos = readUint16(data, pos)
     trackCount, pos = readUint16(data, pos)
     division, pos = readUint16(data, pos)
+
+    if trackCount == 0 or trackCount > 256 then
+        error("[MidiParser] Unsupported track count: " .. tostring(trackCount))
+    end
 
     local ticksPerQuarter = division
     if division >= 32768 then
@@ -74,29 +93,32 @@ local function parseTrack(data, pos, yieldFn)
 
     local trackLen
     trackLen, pos = readUint32(data, pos)
-    local trackEnd = pos + trackLen
+    if trackLen <= 0 or trackLen > #data then
+        error("[MidiParser] Invalid track length: " .. tostring(trackLen))
+    end
 
-    local events = {}
-    local evN = 0
-    local absoluteTick = 0
-    local runningStatus = 0
+    local trackEnd = pos + trackLen
+    local events   = {}
+    local evN      = 0
+    local absTick  = 0
+    local runStat  = 0
 
     while pos < trackEnd do
         local delta
         delta, pos = readVarLen(data, pos)
-        absoluteTick = absoluteTick + delta
+        absTick = absTick + delta
 
         local statusByte = sbyte(data, pos)
 
         if statusByte >= 128 then
-            runningStatus = statusByte
+            runStat = statusByte
             pos = pos + 1
         else
-            statusByte = runningStatus
+            statusByte = runStat
         end
 
         local eventType = mfloor(statusByte / 16)
-        local channel = statusByte % 16
+        local channel   = statusByte % 16
 
         if eventType == 0x9 then
             local note, velocity
@@ -104,7 +126,7 @@ local function parseTrack(data, pos, yieldFn)
             velocity, pos = readUint8(data, pos)
             evN = evN + 1
             events[evN] = {
-                tick = absoluteTick,
+                tick = absTick,
                 type = velocity > 0 and "noteOn" or "noteOff",
                 channel = channel,
                 note = note,
@@ -116,7 +138,7 @@ local function parseTrack(data, pos, yieldFn)
             velocity, pos = readUint8(data, pos)
             evN = evN + 1
             events[evN] = {
-                tick = absoluteTick,
+                tick = absTick,
                 type = "noteOff",
                 channel = channel,
                 note = note,
@@ -143,7 +165,7 @@ local function parseTrack(data, pos, yieldFn)
                 local usPerQuarter = b1 * 65536 + b2 * 256 + b3
                 evN = evN + 1
                 events[evN] = {
-                    tick = absoluteTick,
+                    tick = absTick,
                     type = "tempo",
                     usPerQuarter = usPerQuarter,
                     bpm = mfloor(60000000 / usPerQuarter + 0.5),
@@ -159,22 +181,33 @@ local function parseTrack(data, pos, yieldFn)
             sysexLen, pos = readVarLen(data, pos)
             pos = pos + sysexLen
         else
+            -- Unknown status: abort track to avoid infinite loop
             break
         end
 
         if yieldFn then yieldFn() end
     end
 
-    return events, math.max(pos, trackEnd)
+    return events, math_max(pos, trackEnd)
 end
 
+-- ─── Merge & Score ───
+
 -- Event ordering: tick ascending; at same tick: tempo > noteOff > noteOn.
+-- Tie-breaker on note number keeps the comparator strictly weak.
 local function evLess(a, b)
+    if not a or not b then return false end
     if a.tick ~= b.tick then return a.tick < b.tick end
-    if a.type == "tempo" and b.type ~= "tempo" then return true end
-    if b.type == "tempo" and a.type ~= "tempo" then return false end
-    if a.type == "noteOff" and b.type == "noteOn" then return true end
-    if a.type == "noteOn" and b.type == "noteOff" then return false end
+    if a.type ~= b.type then
+        if a.type == "tempo" then return true end
+        if b.type == "tempo" then return false end
+        if a.type == "noteOff" then return true end
+        if b.type == "noteOff" then return false end
+    end
+    -- Same type: use note as tie-breaker if both have it, otherwise equal
+    if a.note and b.note then
+        return a.note < b.note
+    end
     return false
 end
 
@@ -198,49 +231,50 @@ local function mergeTracks(tracks)
 end
 
 local function buildScore(allEvents, ticksPerQuarter, yieldFn)
-    local tempo = 500000
-    local lastTick = 0
-    local lastTimeMs = 0
-    local score = {}
-    local scoreN = 0
+    local tempo       = 500000
+    local lastTick    = 0
+    local lastTimeMs  = 0
+    local score       = {}
+    local scoreN      = 0
     local activeNotes = {}
 
     for _, ev in ipairs(allEvents) do
         local deltaTicks = ev.tick - lastTick
-        local deltaMs = (deltaTicks / ticksPerQuarter) * (tempo / 1000)
-        lastTimeMs = lastTimeMs + deltaMs
-        lastTick = ev.tick
+        local deltaMs    = (deltaTicks / ticksPerQuarter) * (tempo / 1000)
+        lastTimeMs       = lastTimeMs + deltaMs
+        lastTick         = ev.tick
 
         if ev.type == "tempo" then
             tempo = ev.usPerQuarter
         elseif ev.type == "noteOn" then
             local key = ev.channel * 128 + ev.note
+            -- If note retriggered without prior noteOff, force-off old one
             if activeNotes[key] then
                 scoreN = scoreN + 1
                 score[scoreN] = {
-                    timeMs = lastTimeMs,
-                    type = "off",
-                    note = ev.note,
+                    timeMs  = lastTimeMs,
+                    type    = "off",
+                    note    = ev.note,
                     channel = ev.channel,
                 }
             end
             activeNotes[key] = lastTimeMs
             scoreN = scoreN + 1
             score[scoreN] = {
-                timeMs = lastTimeMs,
-                type = "on",
-                note = ev.note,
+                timeMs   = lastTimeMs,
+                type     = "on",
+                note     = ev.note,
                 velocity = ev.velocity,
-                channel = ev.channel,
+                channel  = ev.channel,
             }
         elseif ev.type == "noteOff" then
             local key = ev.channel * 128 + ev.note
             if activeNotes[key] then
                 scoreN = scoreN + 1
                 score[scoreN] = {
-                    timeMs = lastTimeMs,
-                    type = "off",
-                    note = ev.note,
+                    timeMs  = lastTimeMs,
+                    type    = "off",
+                    note    = ev.note,
                     channel = ev.channel,
                 }
                 activeNotes[key] = nil
@@ -250,18 +284,21 @@ local function buildScore(allEvents, ticksPerQuarter, yieldFn)
         if yieldFn then yieldFn() end
     end
 
+    -- Auto-release any still-active notes after 200 ms
     for key, startTime in pairs(activeNotes) do
         scoreN = scoreN + 1
         score[scoreN] = {
-            timeMs = startTime + 200,
-            type = "off",
-            note = key % 128,
+            timeMs  = startTime + 200,
+            type    = "off",
+            note    = key % 128,
             channel = mfloor(key / 128),
         }
     end
 
     return score
 end
+
+-- ─── Cache ───
 
 MidiParser._cache = {}
 
@@ -270,6 +307,8 @@ function MidiParser.clearCache()
         MidiParser._cache[k] = nil
     end
 end
+
+-- ─── Synchronous parse ───
 
 function MidiParser.parse(filePath)
     if MidiParser._cache[filePath] then
@@ -280,7 +319,7 @@ function MidiParser.parse(filePath)
 
     MidiMod.Log("Parsing MIDI file: " .. filePath)
 
-    local file = io.open(filePath, "rb")
+    local file = io_open(filePath, "rb")
     if not file then
         error("[MidiParser] Cannot open file: " .. filePath)
     end
@@ -305,9 +344,10 @@ function MidiParser.parse(filePath)
     MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
 
     MidiParser._cache[filePath] = { score = score, header = header }
-
     return score, header
 end
+
+-- ─── Async parse ───
 
 MidiParser._parseState = nil
 
@@ -339,7 +379,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
             counter = counter + 1
             if counter >= interval then
                 counter = 0
-                if os.clock() >= deadline then
+                if os_clock() >= deadline then
                     coroutine.yield()
                 end
             end
@@ -347,7 +387,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
     end
 
     local co = coroutine.create(function()
-        local file = io.open(filePath, "rb")
+        local file = io_open(filePath, "rb")
         if not file then
             error("[MidiParser] Cannot open file: " .. filePath)
         end
@@ -371,7 +411,6 @@ function MidiParser.parseAsync(filePath, onDone, onError)
             coroutine.yield()
         end
 
-        -- Flatten + C-sort is far faster than Lua k-way merge
         local allEvents = mergeTracks(tracks)
         coroutine.yield()
 
@@ -379,9 +418,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         local score = buildScore(allEvents, header.ticksPerQuarter, yieldScore)
         MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
 
-        -- Cache the result
         MidiParser._cache[filePath] = { score = score, header = header }
-
         return score
     end)
 
@@ -393,7 +430,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
     }
 
     -- Kick off the first resume (reads file, then yields)
-    deadline = os.clock() + FRAME_BUDGET_SEC
+    deadline = os_clock() + FRAME_BUDGET_SEC
     local ok, val = coroutine.resume(co)
     if not ok then
         MidiParser._parseState = nil
@@ -409,7 +446,7 @@ if CLIENT then
         local state = MidiParser._parseState
         if not state then return end
 
-        local dl = os.clock() + FRAME_BUDGET_SEC
+        local dl = os_clock() + FRAME_BUDGET_SEC
         state.deadline(dl)
 
         -- Loop: resume multiple times within budget instead of once per frame
@@ -424,13 +461,12 @@ if CLIENT then
                 if state.onDone then pcall(state.onDone, val) end
                 return
             end
-            -- If we still have budget, resume again immediately
-            if os.clock() >= dl then break end
+            if os_clock() >= dl then break end
         end
     end)
 end
 
--- Searching MIDI files
+-- ─── File discovery ───
 
 local MIDI_STORAGE_WORKSHOP_ID = "3695216167"
 
@@ -445,11 +481,11 @@ local function scanFolder(dir, results)
     local count = 0
     for _, f in pairs(allFiles) do
         local fStr = tostring(f)
-        if string.match(fStr:lower(), "%.midi?$") then
+        if string.find(fStr:lower(), "%.midi?$") then
             if not string.find(fStr, "/") and not string.find(fStr, "\\") then
                 fStr = dir .. "/" .. fStr
             end
-            table.insert(results, fStr)
+            tinsert(results, fStr)
             count = count + 1
         end
     end

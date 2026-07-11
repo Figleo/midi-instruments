@@ -11,6 +11,21 @@ local NET_NOTES      = "MidiMod.Notes"
 local NET_BUFF_START = "MidiMod.BuffStart"
 local NET_BUFF_STOP  = "MidiMod.BuffStop"
 
+local pcall          = pcall
+local tonumber       = tonumber
+local tostring       = tostring
+local pairs          = pairs
+local ipairs         = ipairs
+local tconcat        = table.concat
+local tinsert        = table.insert
+local string_find    = string.find
+local string_gmatch  = string.gmatch
+local string_match   = string.match
+local math_max       = math.max
+local os_clock       = os.clock
+
+-- ─── Init ───
+
 function Network.init()
     if SERVER then Network.initServer() end
     if CLIENT then Network.initClient() end
@@ -92,11 +107,14 @@ function Network.initClient()
     end)
 end
 
+-- ─── Helpers ───
+
 function Network.resolveMidiPath(fileName)
-    if string.find(fileName, "/") or string.find(fileName, "\\") then
+    if string_find(fileName, "/") or string_find(fileName, "\\") then
         return fileName
     end
-    return MidiMod.BasePath .. "Midi/" .. fileName
+    local base = MidiMod.BasePath or ""
+    return base .. "Midi/" .. fileName
 end
 
 -- Play/release notes received from a remote player
@@ -118,14 +136,14 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
 
     -- Track that this character is streaming music
     if MidiMod.Player and MidiMod.Player.streamingCharacters then
-        MidiMod.Player.streamingCharacters[charID] = os.clock()
+        MidiMod.Player.streamingCharacters[charID] = os_clock()
     end
 
-    for part in string.gmatch(notesStr, "([^;]+)") do
-        local note, vel = string.match(part, "(%d+),(%d+)")
+    for part in string_gmatch(notesStr, "([^;]+)") do
+        local note, vel = string_match(part, "(%d+),(%d+)")
         if note and vel then
             local noteNum = tonumber(note)
-            local velNum = tonumber(vel)
+            local velNum  = tonumber(vel)
 
             if velNum == 0 then
                 -- noteOff: smooth fade-out
@@ -184,13 +202,19 @@ function Network.notifyBuffStop(character)
     Networking.Send(msg)
 end
 
--- High-level: load + play a MIDI file (async parse, no main-thread stutter)
+-- ─── High-level requests ───
+
 function Network.requestPlay(fileName, tempoMult)
     tempoMult = tempoMult or 1.0
 
     local character = Character.Controlled
     if not character or not MidiMod.IsHoldingInstrument(character) then
         MidiMod.Log("Not holding instrument!")
+        return
+    end
+
+    if not MidiMod.Player then
+        MidiMod.Log("Player module not loaded!")
         return
     end
 
@@ -224,7 +248,6 @@ function Network.requestPlay(fileName, tempoMult)
     )
 end
 
--- High-level: stop playback and notify others
 function Network.requestStop(charID)
     -- Cancel any in-progress async parse
     if MidiMod.MidiParser then
