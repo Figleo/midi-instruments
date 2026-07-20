@@ -34,35 +34,6 @@ local string_format        = string.format
 
 -- ─── MIDI Loading ───
 
-function Player.loadFile(filePath)
-    Player.stop()
-
-    if not MidiMod.MidiParser then
-        MidiMod.Log("MidiParser not available!")
-        return false
-    end
-
-    local ok, score = pcall(function()
-        return MidiMod.MidiParser.parse(filePath)
-    end)
-
-    if not ok then
-        MidiMod.Log("Failed to parse MIDI: " .. tostring(score))
-        return false
-    end
-
-    if not score or #score == 0 then
-        MidiMod.Log("MIDI file has no notes: " .. filePath)
-        return false
-    end
-
-    Player.score = score
-    Player.cursor = 1
-    Player.currentFile = filePath
-    MidiMod.Log("Loaded MIDI: " .. #score .. " notes from " .. filePath)
-    return true
-end
-
 function Player.loadScore(score, filePath)
     Player.stop()
     if not score or #score == 0 then
@@ -161,13 +132,9 @@ function Player.stopChar(charID)
     end
 
     -- Otherwise just stop all sounds for that remote character
+    -- (stopAllForChar already clears activeNoteUIDs[charID])
     if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
         MidiMod.SoundEngine.stopAllForChar(charID)
-    end
-
-    -- Clear note tracking for this character
-    if MidiMod.SoundEngine and MidiMod.SoundEngine.activeNoteUIDs then
-        MidiMod.SoundEngine.activeNoteUIDs[charID] = nil
     end
 
     Player.streamingCharacters[charID] = nil
@@ -210,13 +177,12 @@ local AIM_SUPPRESS_DURATION = 0.5
 
 local function hasInteractTarget(character)
     local found = false
-    pcall(function() found = (character.FocusedItem ~= nil) end)
-    if found then return true end
-    pcall(function() found = (character.SelectedItem ~= nil) end)
-    if found then return true end
-    pcall(function() found = (character.FocusedCharacter ~= nil) end)
-    if found then return true end
-    pcall(function() found = (character.SelectedConstruction ~= nil) end)
+    pcall(function()
+        found = character.FocusedItem ~= nil
+            or character.SelectedItem ~= nil
+            or character.FocusedCharacter ~= nil
+            or character.SelectedConstruction ~= nil
+    end)
     return found
 end
 

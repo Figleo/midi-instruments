@@ -80,8 +80,6 @@ function MidiMod.IsHoldingInstrument(character)
     return MidiMod.GetHeldInstrument(character) ~= nil
 end
 
-MidiMod.IsHoldingAccordion = MidiMod.IsHoldingInstrument
-
 MidiMod.Log("=== MIDI Instruments v" .. MidiMod.Version .. " ===")
 MidiMod.Log("Base path: " .. MidiMod.BasePath)
 
@@ -144,14 +142,14 @@ if xmlVol then
     MidiMod.Log("Volume loaded from settings: " .. MidiMod.CurrentVolume)
 end
 
--- Poll volume changes periodically (client only, every ~2 seconds)
+-- Poll volume changes periodically (client only, every ~5 seconds)
 if CLIENT then
     local lastKnownVolume = MidiMod.CurrentVolume
     local checkCounter = 0
 
     Hook.Add("think", "midi_live_config", function()
         checkCounter = checkCounter + 1
-        if checkCounter % 120 ~= 0 then return end
+        if checkCounter % 300 ~= 0 then return end
 
         local vol = readVolumeFromXML()
         if vol and math.abs(vol - lastKnownVolume) > 0.001 then

@@ -49,6 +49,7 @@ SoundEngine.initialized    = false
 
 -- Chunked loading state
 local _loadQueue           = nil
+local _loadIdx             = 1   -- index cursor; avoids O(n) tremove(1)
 local _loadDone            = false
 local _loadSamplesLoaded   = 0
 local _loadObjectsLoaded   = 0
@@ -84,6 +85,7 @@ function SoundEngine.init()
 
     local instruments = { "accordion", "guitar", "guitarelectric", "harmonica" }
     _loadQueue = {}
+    _loadIdx   = 1
 
     for _, inst in ipairs(instruments) do
         SoundEngine.soundBanks[inst]   = {}
@@ -101,13 +103,16 @@ function SoundEngine.init()
         #_loadQueue, #instruments))
 end
 
--- Process up to LOAD_PER_FRAME jobs per frame
+-- Process up to LOAD_PER_FRAME jobs per frame.
+-- Uses an index cursor instead of tremove(1) to avoid O(n) array shifts.
 local function pumpLoadQueue()
     if _loadQueue == nil or _loadDone then return end
 
     local processed = 0
-    while #_loadQueue > 0 and processed < LOAD_PER_FRAME do
-        local job = tremove(_loadQueue, 1)
+    local qLen = #_loadQueue
+    while _loadIdx <= qLen and processed < LOAD_PER_FRAME do
+        local job = _loadQueue[_loadIdx]
+        _loadIdx  = _loadIdx + 1
         processed = processed + 1
 
         local fileExists = false
@@ -142,8 +147,9 @@ local function pumpLoadQueue()
         end
     end
 
-    if #_loadQueue == 0 then
+    if _loadIdx > qLen then
         _loadDone = true
+        _loadQueue = nil  -- allow GC
         SoundEngine.initialized = true
         MidiMod.Log(string.format(
             "[SoundEngine] Load complete: %d samples (%d objects).",
@@ -296,14 +302,15 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
 
     if not channel then return nil end
 
-    -- Set pitch
-    pcall(function() channel.FrequencyMultiplier = freqMult end)
-
-    if worldPos then
-        pcall(function() channel.Near = SOUND_NEAR end)
-        pcall(function() channel.Far = SOUND_RANGE end)
-        pcall(function() channel.Position = Vector3(worldPos.X, worldPos.Y, 0) end)
-    end
+    -- Set pitch and positional properties in one guarded block
+    pcall(function()
+        channel.FrequencyMultiplier = freqMult
+        if worldPos then
+            channel.Near     = SOUND_NEAR
+            channel.Far      = SOUND_RANGE
+            channel.Position = Vector3(worldPos.X, worldPos.Y, 0)
+        end
+    end)
 
     local uid = nextUID()
 
@@ -358,11 +365,10 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     return nil, nil
 end
 
--- ─── Think Hook ───
+-- ─── Think Hook (client-only) ───
 
+if CLIENT then
 Hook.Add("think", "midi_sound_tick", function()
-    if not CLIENT then return end
-
     pumpLoadQueue()
 
     SoundEngine.notesThisFrame = 0
@@ -382,6 +388,7 @@ Hook.Add("think", "midi_sound_tick", function()
         tremove(SoundEngine.noteQueue, 1)
     end
 end)
+end
 
 -- ─── Note Release / Stop ───
 

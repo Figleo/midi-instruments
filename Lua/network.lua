@@ -18,7 +18,6 @@ local pairs          = pairs
 local ipairs         = ipairs
 local tconcat        = table.concat
 local tinsert        = table.insert
-local string_find    = string.find
 local string_gmatch  = string.gmatch
 local string_match   = string.match
 local math_max       = math.max
@@ -108,14 +107,6 @@ function Network.initClient()
 end
 
 -- ─── Helpers ───
-
-function Network.resolveMidiPath(fileName)
-    if string_find(fileName, "/") or string_find(fileName, "\\") then
-        return fileName
-    end
-    local base = MidiMod.BasePath or ""
-    return base .. "Midi/" .. fileName
-end
 
 -- Play/release notes received from a remote player
 function Network.playStreamedNotes(charID, notesStr, instrId)
@@ -221,7 +212,7 @@ function Network.requestPlay(fileName, tempoMult)
     -- Stop current playback first
     Network.requestStop()
 
-    local fullPath = Network.resolveMidiPath(fileName)
+    local fullPath = fileName
     MidiMod.Log("Loading MIDI: " .. fullPath)
 
     MidiMod.MidiParser.parseAsync(
