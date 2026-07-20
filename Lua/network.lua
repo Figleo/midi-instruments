@@ -1,5 +1,5 @@
 -- Network: real-time note sync for multiplayer
--- Direct send (no buffering) to avoid server event spam
+-- Reliable delivery + jitter buffer for smooth remote playback
 
 MidiMod              = MidiMod or {}
 MidiMod.Network      = {}
@@ -22,6 +22,18 @@ local string_gmatch  = string.gmatch
 local string_match   = string.match
 local math_max       = math.max
 local os_clock       = os.clock
+local math_floor     = math.floor
+
+-- ─── Jitter buffer ───
+-- Delays incoming notes slightly to smooth out network jitter.
+-- Adds JITTER_MS of latency but produces consistent rhythm.
+local JITTER_MS      = 60
+local _noteBuffer    = {}
+local _noteBufLen    = 0
+
+local function getNetTimeMs()
+    return os_clock() * 1000
+end
 
 -- ─── Init ───
 
@@ -108,7 +120,9 @@ end
 
 -- ─── Helpers ───
 
--- Play/release notes received from a remote player
+-- Queue notes into jitter buffer instead of playing immediately.
+-- Format: "delta:note,vel;delta:note,vel;..." (delta in ms from batch start)
+-- Backward compat: "note,vel" without delta prefix is treated as delta=0.
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
 
@@ -125,33 +139,94 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
     end
 
-    -- Track that this character is streaming music
     if MidiMod.Player and MidiMod.Player.streamingCharacters then
         MidiMod.Player.streamingCharacters[charID] = os_clock()
     end
 
-    for part in string_gmatch(notesStr, "([^;]+)") do
-        local note, vel = string_match(part, "(%d+),(%d+)")
-        if note and vel then
-            local noteNum = tonumber(note)
-            local velNum  = tonumber(vel)
+    local receiveTime = getNetTimeMs()
 
-            if velNum == 0 then
-                -- noteOff: smooth fade-out
-                if MidiMod.SoundEngine.releaseNote then
-                    pcall(MidiMod.SoundEngine.releaseNote, noteNum, charID)
-                end
-            else
-                -- noteOn: play the sound
-                pcall(function()
-                    MidiMod.SoundEngine.playNote(noteNum, velNum, worldPos, instrId, charID)
-                end)
-            end
+    for part in string_gmatch(notesStr, "([^;]+)") do
+        -- Try "delta:note,vel" first, fall back to "note,vel"
+        local delta, note, vel = string_match(part, "(%d+):(%d+),(%d+)")
+        if not delta then
+            note, vel = string_match(part, "(%d+),(%d+)")
+            delta = 0
+        else
+            delta = tonumber(delta)
         end
+
+        if note and vel then
+            _noteBufLen = _noteBufLen + 1
+            _noteBuffer[_noteBufLen] = {
+                playAt   = receiveTime + JITTER_MS + delta,
+                note     = tonumber(note),
+                vel      = tonumber(vel),
+                charID   = charID,
+                instrId  = instrId,
+                worldPos = worldPos,
+            }
+        end
+    end
+
+    -- Safety cap: if buffer grows too large, something is wrong — flush it
+    if _noteBufLen > 256 then
+        Network.clearBuffer()
     end
 end
 
--- Direct send: no buffering, notes go out immediately to preserve timing
+-- Clear jitter buffer. No args = clear all; charID = clear for that player.
+function Network.clearBuffer(charID)
+    if _noteBufLen == 0 then return end
+    if not charID then
+        for i = 1, _noteBufLen do _noteBuffer[i] = nil end
+        _noteBufLen = 0
+        return
+    end
+    local kept = 0
+    for i = 1, _noteBufLen do
+        if _noteBuffer[i].charID ~= charID then
+            kept = kept + 1
+            _noteBuffer[kept] = _noteBuffer[i]
+        end
+    end
+    for i = kept + 1, _noteBufLen do _noteBuffer[i] = nil end
+    _noteBufLen = kept
+end
+
+-- Drain jitter buffer: play notes whose scheduled time has arrived
+if CLIENT then
+    Hook.Add("think", "MidiMod.Network.JitterPump", function()
+        if _noteBufLen == 0 then return end
+
+        local now  = getNetTimeMs()
+        local kept = 0
+
+        for i = 1, _noteBufLen do
+            local entry = _noteBuffer[i]
+            if entry.playAt <= now then
+                if entry.vel == 0 then
+                    if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
+                        pcall(MidiMod.SoundEngine.releaseNote, entry.note, entry.charID)
+                    end
+                else
+                    pcall(function()
+                        MidiMod.SoundEngine.playNote(
+                            entry.note, entry.vel, entry.worldPos, entry.instrId, entry.charID)
+                    end)
+                end
+            else
+                kept = kept + 1
+                _noteBuffer[kept] = entry
+            end
+        end
+
+        for i = kept + 1, _noteBufLen do _noteBuffer[i] = nil end
+        _noteBufLen = kept
+    end)
+end
+
+-- Reliable delivery: a lost note is worse than a delayed note for music.
+-- The jitter buffer absorbs timing variance from retries.
 function Network.broadcastNotes(charID, notesStr, instrId)
     if Game.IsSingleplayer then return end
 
@@ -270,4 +345,4 @@ function Network.requestStop(charID)
     end
 end
 
-MidiMod.Log("[Network] Loaded. Direct send, per-player stop.")
+MidiMod.Log("[Network] Loaded. Jitter buffer=" .. JITTER_MS .. "ms, per-player stop.")

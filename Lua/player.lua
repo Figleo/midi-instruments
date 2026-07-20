@@ -110,6 +110,9 @@ function Player.stop()
     if MidiMod.SoundEngine then
         pcall(MidiMod.SoundEngine.stopAll)
     end
+    if MidiMod.Network and MidiMod.Network.clearBuffer then
+        MidiMod.Network.clearBuffer()
+    end
 
     if wasPlaying then
         MidiMod.Log("Playback stopped")
@@ -135,6 +138,9 @@ function Player.stopChar(charID)
     -- (stopAllForChar already clears activeNoteUIDs[charID])
     if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
         MidiMod.SoundEngine.stopAllForChar(charID)
+    end
+    if MidiMod.Network and MidiMod.Network.clearBuffer then
+        MidiMod.Network.clearBuffer(charID)
     end
 
     Player.streamingCharacters[charID] = nil
@@ -230,6 +236,7 @@ local function onThink()
     local now = getTimeMs()
     local elapsed = (now - Player.startTime) * Player.tempoMultiplier
     local streamBatch = {}
+    local batchOriginMs = nil  -- first event's timeMs in this batch
 
     local charID = nil
     pcall(function() charID = Player.sourceCharacter.ID end)
@@ -248,14 +255,18 @@ local function onThink()
                     pcall(MidiMod.SoundEngine.playNote, event.note, event.velocity, worldPos, currentInst, charID)
                 end
                 if Player.isStreamingHost then
-                    tinsert(streamBatch, event.note .. "," .. event.velocity)
+                    if not batchOriginMs then batchOriginMs = event.timeMs end
+                    local d = math_floor(event.timeMs - batchOriginMs + 0.5)
+                    tinsert(streamBatch, d .. ":" .. event.note .. "," .. event.velocity)
                 end
             elseif evType == "off" then
                 if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
                     pcall(MidiMod.SoundEngine.releaseNote, event.note, charID)
                 end
                 if Player.isStreamingHost then
-                    tinsert(streamBatch, event.note .. ",0")
+                    if not batchOriginMs then batchOriginMs = event.timeMs end
+                    local d = math_floor(event.timeMs - batchOriginMs + 0.5)
+                    tinsert(streamBatch, d .. ":" .. event.note .. ",0")
                 end
             end
 
