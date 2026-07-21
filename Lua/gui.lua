@@ -11,7 +11,6 @@ MGUI.panel                 = nil
 MGUI.isOpen                = false
 MGUI.midiFiles             = {}
 MGUI.selectedFile          = nil
-MGUI.tempoValue            = 1.0
 
 local wasHoldingInstrument = false
 
@@ -246,7 +245,7 @@ local function createPanel()
     )
     playBtn.OnClicked      = function()
         if MGUI.selectedFile and MidiMod.Network then
-            MidiMod.Network.requestPlay(MGUI.selectedFile, MGUI.tempoValue)
+            MidiMod.Network.requestPlay(MGUI.selectedFile)
         end
         return true
     end

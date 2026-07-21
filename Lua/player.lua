@@ -10,13 +10,10 @@ local Player               = MidiMod.Player
 Player.score               = nil
 Player.cursor              = 1
 Player.playing             = false
-Player.paused              = false
 Player.startTime           = 0
-Player.pauseTime           = 0
 Player.tempoMultiplier     = 1.0
 Player.currentFile         = nil
 Player.sourceCharacter     = nil
-Player.onStateChange       = nil
 Player.isStreamingHost     = false
 Player.instrumentDropped   = false
 Player.streamingCharacters = {} -- tracks remote players streaming to us
@@ -30,7 +27,6 @@ local math_floor           = math.floor
 local os_clock             = os.clock
 local tinsert              = table.insert
 local tconcat              = table.concat
-local string_format        = string.format
 
 -- ─── MIDI Loading ───
 
@@ -68,40 +64,15 @@ function Player.play(character)
         Player.sourceCharacter = character
     end
 
-    if Player.paused then
-        local pausedDuration = getTimeMs() - Player.pauseTime
-        Player.startTime = Player.startTime + pausedDuration
-        Player.paused = false
-        Player.playing = true
-        MidiMod.Log("Playback resumed")
-    else
-        Player.cursor = 1
-        Player.startTime = getTimeMs()
-        Player.playing = true
-        Player.paused = false
-        MidiMod.Log("Playback started (" .. #Player.score .. " notes)")
-    end
-
-    if Player.onStateChange then
-        pcall(Player.onStateChange, "play")
-    end
-end
-
-function Player.pause()
-    if Player.playing and not Player.paused then
-        Player.paused = true
-        Player.pauseTime = getTimeMs()
-        MidiMod.Log("Playback paused")
-        if Player.onStateChange then
-            pcall(Player.onStateChange, "pause")
-        end
-    end
+    Player.cursor = 1
+    Player.startTime = getTimeMs()
+    Player.playing = true
+    MidiMod.Log("Playback started (" .. #Player.score .. " notes)")
 end
 
 function Player.stop()
     local wasPlaying = Player.playing
     Player.playing = false
-    Player.paused = false
     Player.cursor = 1
     Player.sourceCharacter = nil
     Player.isStreamingHost = false
@@ -116,9 +87,6 @@ function Player.stop()
 
     if wasPlaying then
         MidiMod.Log("Playback stopped")
-        if Player.onStateChange then
-            pcall(Player.onStateChange, "stop")
-        end
     end
 end
 
@@ -148,27 +116,6 @@ end
 
 function Player.setTempo(multiplier)
     Player.tempoMultiplier = math_max(0.25, math_min(4.0, multiplier))
-end
-
-function Player.getProgress()
-    if not Player.score or #Player.score == 0 then return 0 end
-    return (Player.cursor - 1) / #Player.score
-end
-
-function Player.getTimeString()
-    if not Player.playing then return "0:00 / 0:00" end
-
-    local elapsed = (getTimeMs() - Player.startTime) * Player.tempoMultiplier
-    local total   = Player.score[#Player.score].timeMs
-
-    local function formatTime(ms)
-        local s = math_floor(ms / 1000)
-        local m = math_floor(s / 60)
-        s = s % 60
-        return string_format("%d:%02d", m, s)
-    end
-
-    return formatTime(elapsed) .. " / " .. formatTime(total)
 end
 
 -- ─── AIM: Hold instrument via forced RMB input ───
@@ -219,11 +166,10 @@ end
 
 -- ─── Note Playback Logic ───
 
-local function onThink()
-    if not Player.playing or Player.paused then return end
+local function onThink(currentInst, currentItem)
+    if not Player.playing then return end
     if not Player.score then return end
 
-    local currentInst, currentItem = MidiMod.GetHeldInstrument(Player.sourceCharacter)
     currentInst = currentInst or "accordion"
 
     local worldPos = nil
@@ -291,11 +237,6 @@ local function onThink()
         MidiMod.Log("Playback complete")
         local wasStreaming = Player.isStreamingHost
         Player.playing = false
-        Player.paused = false
-
-        if Player.onStateChange then
-            pcall(Player.onStateChange, "stop")
-        end
 
         -- Notify other players that we stopped
         if wasStreaming and charID and MidiMod.Network then
@@ -332,7 +273,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
         end
     end
 
-    if not Player.sourceCharacter or not Player.playing or Player.paused then
+    if not Player.sourceCharacter or not Player.playing then
         return
     end
 
@@ -361,7 +302,8 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     forceAim(ch)
 
     -- Stop if instrument was dropped
-    if not MidiMod.IsHoldingInstrument(ch) then
+    local currentInst, currentItem = MidiMod.GetHeldInstrument(ch)
+    if not currentInst then
         if not Player.instrumentDropped then
             Player.instrumentDropped = true
             MidiMod.Log("Instrument dropped — stopping playback")
@@ -375,7 +317,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     end
     Player.instrumentDropped = false
 
-    onThink()
+    onThink(currentInst, currentItem)
 end)
 
 -- ─── BUFF SYSTEM (vanilla talent trigger) ───

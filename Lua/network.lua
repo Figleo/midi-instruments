@@ -9,7 +9,6 @@ local Network        = MidiMod.Network
 local NET_STOP       = "MidiMod.Stop"
 local NET_NOTES      = "MidiMod.Notes"
 local NET_BUFF_START = "MidiMod.BuffStart"
-local NET_BUFF_STOP  = "MidiMod.BuffStop"
 
 local pcall          = pcall
 local tonumber       = tonumber
@@ -88,11 +87,6 @@ function Network.initServer()
         if character and character.ID == charID then
             Hook.Call("MidiMod.Server.BuffStart", charID, character)
         end
-    end)
-
-    Networking.Receive(NET_BUFF_STOP, function(message, client)
-        local charID = message.ReadUInt16()
-        Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
 end
 
@@ -253,17 +247,6 @@ function Network.notifyBuffStart(character)
     if not charID then return end
 
     local msg = Networking.Start(NET_BUFF_START)
-    msg.WriteUInt16(charID)
-    Networking.Send(msg)
-end
-
-function Network.notifyBuffStop(character)
-    if Game.IsSingleplayer or not character then return end
-    local charID = nil
-    pcall(function() charID = character.ID end)
-    if not charID then return end
-
-    local msg = Networking.Start(NET_BUFF_STOP)
     msg.WriteUInt16(charID)
     Networking.Send(msg)
 end

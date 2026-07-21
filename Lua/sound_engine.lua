@@ -60,7 +60,6 @@ local pairs                = pairs
 local math_max             = math.max
 local math_min             = math.min
 local math_floor           = math.floor
-local math_abs             = math.abs
 local os_clock             = os.clock
 local tinsert              = table.insert
 local tremove              = table.remove
@@ -417,34 +416,6 @@ function SoundEngine.releaseNote(midiNote, charID)
     end
 
     -- Clean tracking
-    if charID and SoundEngine.activeNoteUIDs[charID] then
-        SoundEngine.activeNoteUIDs[charID][midiNote] = nil
-    end
-end
-
--- Stop a specific note (hard kill, all instances or exact UID match)
-function SoundEngine.stopNote(midiNote, charID, uid)
-    -- Remove from queue
-    for i = #SoundEngine.noteQueue, 1, -1 do
-        if SoundEngine.noteQueue[i].midiNote == midiNote then
-            if not charID or SoundEngine.noteQueue[i].charID == charID then
-                tremove(SoundEngine.noteQueue, i)
-            end
-        end
-    end
-
-    -- Remove from active channels
-    for i = #SoundEngine.activeChannels, 1, -1 do
-        local info = SoundEngine.activeChannels[i]
-        if info.note == midiNote and (not charID or info.charID == charID) then
-            -- If UID passed, kill only that exact channel; otherwise kill all matches
-            if uid == nil or info.uid == uid then
-                fadeDisposeChannel(i)
-            end
-        end
-    end
-
-    -- Clear from tracking
     if charID and SoundEngine.activeNoteUIDs[charID] then
         SoundEngine.activeNoteUIDs[charID][midiNote] = nil
     end

@@ -1,8 +1,8 @@
 -- Midis mod entry. LuaCsForBarotrauma loads this file on startup.
 
-local basePath = table.pack(...)[1] or "LocalMods/Midis"
+local basePath = table.pack(...)[1] or "LocalMods/Midi"
 if type(basePath) ~= "string" then
-    basePath = tostring(basePath) or "LocalMods/Midis"
+    basePath = tostring(basePath)
 end
 if string.sub(basePath, -1) ~= "/" and string.sub(basePath, -1) ~= "\\" then
     basePath = basePath .. "/"

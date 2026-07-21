@@ -8,11 +8,8 @@ local sbyte        = string.byte
 local ssub         = string.sub
 local mfloor       = math.floor
 local tinsert      = table.insert
-local tsort        = table.sort
 local ipairs       = ipairs
 local pairs        = pairs
-local type         = type
-local tonumber     = tonumber
 local tostring     = tostring
 local error        = error
 local io_open      = io.open
@@ -306,45 +303,6 @@ function MidiParser.clearCache()
     for k in pairs(MidiParser._cache) do
         MidiParser._cache[k] = nil
     end
-end
-
--- ─── Synchronous parse ───
-
-function MidiParser.parse(filePath)
-    if MidiParser._cache[filePath] then
-        MidiMod.Log("Cache hit: " .. filePath)
-        local cached = MidiParser._cache[filePath]
-        return cached.score, cached.header
-    end
-
-    MidiMod.Log("Parsing MIDI file: " .. filePath)
-
-    local file = io_open(filePath, "rb")
-    if not file then
-        error("[MidiParser] Cannot open file: " .. filePath)
-    end
-    local data = file:read("*all")
-    file:close()
-
-    if not data or #data < 14 then
-        error("[MidiParser] File too small or empty: " .. filePath)
-    end
-
-    local pos = 1
-    local header
-    header, pos = parseHeader(data, pos)
-
-    local tracks = {}
-    for i = 1, header.trackCount do
-        tracks[i], pos = parseTrack(data, pos)
-    end
-
-    local allEvents = mergeTracks(tracks)
-    local score     = buildScore(allEvents, header.ticksPerQuarter)
-    MidiMod.Log("Parsed " .. #score .. " notes from " .. filePath)
-
-    MidiParser._cache[filePath] = { score = score, header = header }
-    return score, header
 end
 
 -- ─── Async parse ───
