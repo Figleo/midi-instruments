@@ -118,6 +118,69 @@ function Player.setTempo(multiplier)
     Player.tempoMultiplier = math_max(0.25, math_min(4.0, multiplier))
 end
 
+-- ─── Seek / Progress (used by the GUI slider) ───
+
+function Player.getDurationMs()
+    local score = Player.score
+    if not score or #score == 0 then return 0 end
+    return score[#score].timeMs or 0
+end
+
+function Player.getPositionMs()
+    if not Player.playing then return 0 end
+    local pos = (getTimeMs() - Player.startTime) * Player.tempoMultiplier
+    return math_max(0, math_min(pos, Player.getDurationMs()))
+end
+
+function Player.seek(targetMs)
+    if not Player.playing or not Player.score then return end
+
+    local score = Player.score
+    targetMs = math_max(0, math_min(targetMs or 0, Player.getDurationMs()))
+
+    -- Cut notes sounding right now so nothing hangs across the jump.
+    -- Skipped "off" events would otherwise never release them.
+    local charID = nil
+    pcall(function() charID = Player.sourceCharacter.ID end)
+    if MidiMod.SoundEngine then
+        if charID and MidiMod.SoundEngine.stopAllForChar then
+            pcall(MidiMod.SoundEngine.stopAllForChar, charID)
+        else
+            pcall(MidiMod.SoundEngine.stopAll)
+        end
+    end
+    if MidiMod.Network and MidiMod.Network.clearBuffer then
+        pcall(MidiMod.Network.clearBuffer, charID)
+    end
+
+    -- Remote listeners also skipped the "off" events — tell them to cut our
+    -- sounding notes. NET_STOP on other clients only stops sounds for this
+    -- charID; the notes we stream after the seek play normally.
+    if Player.isStreamingHost and charID and not Game.IsSingleplayer then
+        pcall(function()
+            local msg = Networking.Start("MidiMod.Stop")
+            msg.WriteUInt16(charID)
+            Networking.Send(msg)
+        end)
+        -- NET_STOP also fires BuffStop on the server — re-arm buffs since
+        -- we're still playing.
+        if MidiMod.BuffsEnabled and MidiMod.Network and MidiMod.Network.notifyBuffStart then
+            pcall(MidiMod.Network.notifyBuffStart, Player.sourceCharacter)
+        end
+    end
+
+    -- Binary search: first event with timeMs >= targetMs
+    local lo, hi = 1, #score + 1
+    while lo < hi do
+        local mid = math_floor((lo + hi) / 2)
+        if score[mid].timeMs < targetMs then lo = mid + 1 else hi = mid end
+    end
+    Player.cursor = lo
+
+    -- elapsed = (now - startTime) * tempoMultiplier  =>  shift startTime
+    Player.startTime = getTimeMs() - targetMs / Player.tempoMultiplier
+end
+
 -- ─── AIM: Hold instrument via forced RMB input ───
 -- Suppressed when LMB is used on an interactable target
 

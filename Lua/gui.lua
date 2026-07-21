@@ -42,9 +42,20 @@ local panelFrame             = nil
 local statusLabel            = nil
 local fileListBox            = nil
 local searchBox              = nil
+local progressSlider         = nil
+local progressTimeLabel      = nil
+
+-- Seek drag state: apply the seek on mouse release, not on every drag tick
+local pendingSeekScroll      = nil
+local lastSliderDragTime     = 0
 
 local lastSearch             = ""
 local savedPanelScreenOffset = nil
+
+local function formatTime(ms)
+    local totalSec = math.floor((ms or 0) / 1000 + 0.5)
+    return string.format("%d:%02d", math.floor(totalSec / 60), totalSec % 60)
+end
 
 -- ── File list builder ─────────────────────────────────────────────────────────
 local function rebuildFileList(searchText)
@@ -100,13 +111,16 @@ local function destroyPanel()
         pcall(function() frame.Visible = false end)
         pcall(function() frame.RectTransform.Parent = nil end)
     end
-    frame       = nil
-    panelFrame  = nil
-    statusLabel = nil
-    fileListBox = nil
-    searchBox   = nil
-    MGUI.panel  = nil
-    MGUI.isOpen = false
+    frame             = nil
+    panelFrame        = nil
+    statusLabel       = nil
+    fileListBox       = nil
+    searchBox         = nil
+    progressSlider    = nil
+    progressTimeLabel = nil
+    pendingSeekScroll = nil
+    MGUI.panel        = nil
+    MGUI.isOpen       = false
 end
 
 local function createPanel()
@@ -128,7 +142,7 @@ local function createPanel()
         GUI.RectTransform(Point(panelW, panelH), frame.RectTransform, GUI.Anchor.BottomRight),
         "GUIFrameListBox"
     )
-    panelFrame.RectTransform.AbsoluteOffset = Point(20, 120)
+    panelFrame.RectTransform.AbsoluteOffset = Point(20, 220)
     panelFrame.CanBeFocused = true
 
     if savedPanelScreenOffset then
@@ -232,55 +246,79 @@ local function createPanel()
 
     rebuildFileList(lastSearch)
 
-    -- ── Divider ───────────────────────────────────────────────────────────────
-    local divider          = GUI.Frame(
-        GUI.RectTransform(Vector2(1, 0.01), contentList.Content.RectTransform),
-        "HorizontalLine"
-    )
-    divider.CanBeFocused   = false
-
-    -- ── Play / Stop ───────────────────────────────────────────────────────────
-    local actionRow        = GUI.Frame(
-        GUI.RectTransform(Vector2(1, 0.11), contentList.Content.RectTransform),
+    -- ── Progress slider: [0:42] [====|-----] [3:15] ──────────────────────────
+    local progressRow           = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
         nil
     )
-    actionRow.CanBeFocused = false
+    progressRow.CanBeFocused    = false
 
-    local playBtn          = GUI.Button(
+    progressTimeLabel           = GUI.TextBlock(
+        GUI.RectTransform(Vector2(0.26, 1), progressRow.RectTransform, GUI.Anchor.CenterRight),
+        "0:00 / 0:00",
+        nil, nil, GUI.Alignment.Center
+    )
+    progressTimeLabel.TextColor = Color(160, 160, 160)
+
+    progressSlider              = GUI.ScrollBar(
+        GUI.RectTransform(Vector2(0.72, 0.85), progressRow.RectTransform, GUI.Anchor.CenterLeft),
+        0.1, nil, "GUISlider"
+    )
+    progressSlider.BarScroll    = 0
+    progressSlider.OnMoved      = function(sb, scroll)
+        pendingSeekScroll  = scroll
+        lastSliderDragTime = os.clock()
+        return true
+    end
+
+    ---- ── Divider ───────────────────────────────────────────────────────────────
+    --local divider          = GUI.Frame(
+    --    GUI.RectTransform(Vector2(1, 0.01), contentList.Content.RectTransform),
+    --    "HorizontalLine"
+    --)
+    --divider.CanBeFocused   = false
+
+    -- ── Play / Stop ───────────────────────────────────────────────────────────
+    local actionRow             = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
+        nil
+    )
+    actionRow.CanBeFocused      = false
+
+    local playBtn               = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterLeft),
         L("play", "Play"), GUI.Alignment.Center, "GUIButtonSmall"
     )
-    playBtn.OnClicked      = function()
+    playBtn.OnClicked           = function()
         if MGUI.selectedFile and MidiMod.Network then
             MidiMod.Network.requestPlay(MGUI.selectedFile)
         end
         return true
     end
 
-    local stopBtn          = GUI.Button(
+    local stopBtn               = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterRight),
         L("stop", "Stop"), GUI.Alignment.Center, "GUIButtonSmall"
     )
-    stopBtn.OnClicked      = function()
+    stopBtn.OnClicked           = function()
         if MidiMod.Network then
             MidiMod.Network.requestStop()
         end
         return true
     end
 
-
     -- ── Buff toggle ───────────────────────────────────────────────────────────
-    local buffRow        = GUI.Frame(
+    local buffRow               = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
         nil
     )
-    buffRow.CanBeFocused = false
+    buffRow.CanBeFocused        = false
 
-    local buffTick       = GUI.TickBox(
+    local buffTick              = GUI.TickBox(
         GUI.RectTransform(Vector2(1, 1), buffRow.RectTransform, GUI.Anchor.CenterLeft),
         L("talentbuffs", "Talent Buffs")
     )
-    buffTick.Selected    = MidiMod.BuffsEnabled
+    buffTick.Selected           = MidiMod.BuffsEnabled
     pcall(function()
         buffTick.TextColor = Color(180, 180, 180)
     end)
@@ -384,6 +422,40 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
                 if MGUI.nowPlayingLabel then
                     MGUI.nowPlayingLabel.Text = ""
                 end
+            end
+        end)
+    end
+
+    -- ── Progress slider ────────────────────────────────────────────────────────
+    if MGUI.isOpen and progressSlider and MidiMod.Player then
+        pcall(function()
+            local P = MidiMod.Player
+            local durationMs = P.getDurationMs and P.getDurationMs() or 0
+
+            if P.playing and durationMs > 0 then
+                progressSlider.Enabled = true
+
+                local mouseHeld = false
+                pcall(function() mouseHeld = PlayerInput.PrimaryMouseButtonHeld() end)
+
+                if pendingSeekScroll then
+                    -- User is scrubbing: show the drag position, seek on release
+                    progressTimeLabel.Text =
+                        formatTime(pendingSeekScroll * durationMs) .. " / " .. formatTime(durationMs)
+                    if not mouseHeld and (os.clock() - lastSliderDragTime) > 0.05 then
+                        P.seek(pendingSeekScroll * durationMs)
+                        pendingSeekScroll = nil
+                    end
+                else
+                    local posMs              = P.getPositionMs and P.getPositionMs() or 0
+                    progressSlider.BarScroll = posMs / durationMs
+                    progressTimeLabel.Text   = formatTime(posMs) .. " / " .. formatTime(durationMs)
+                end
+            else
+                progressSlider.Enabled   = false
+                progressSlider.BarScroll = 0
+                progressTimeLabel.Text   = "0:00 / 0:00"
+                pendingSeekScroll        = nil
             end
         end)
     end
