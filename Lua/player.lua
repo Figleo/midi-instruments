@@ -378,123 +378,48 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     onThink()
 end)
 
--- ─── BUFF SYSTEM (Server-side affliction application) ───
-
-local TALENT_BUFFS      = {
-    steadytune     = "psychosisimmunity",
-    melodicrespite = "melodicrespite",
-}
-local REQUIRED_PLAY_SEC = 10
-local BUFF_STRENGTH     = 60.0
--- Longer interval = fewer server events = less chance of pipe overload
-local SERVER_REFRESH    = 30
-
-local function hasTalentChar(character, talentID)
-    local found = false
-    pcall(function()
-        if character.HasTalent then
-            found = character.HasTalent(talentID)
-        end
-    end)
-    if not found then
-        pcall(function()
-            if character.Info and character.Info.UnlockedTalents then
-                for _, id in pairs(character.Info.UnlockedTalents) do
-                    if tostring(id):lower() == talentID then
-                        found = true
-                        break
-                    end
-                end
-            end
-        end)
-    end
-    return found
-end
-
--- Check if the character already has this affliction at sufficient strength
--- to avoid redundant ApplyAffliction calls (each one generates a server sync event)
-local function getAfflictionStrength(character, afflictionID)
-    local strength = 0
-    pcall(function()
-        local prefab = AfflictionPrefab.Prefabs[afflictionID]
-        if prefab and character.CharacterHealth then
-            local affliction = character.CharacterHealth.GetAffliction(afflictionID)
-            if affliction then
-                strength = affliction.Strength
-            end
-        end
-    end)
-    return strength
-end
-
-local function applyAffliction(character, afflictionID, strength)
-    -- Skip if the character already has this affliction at high enough strength
-    -- This prevents generating unnecessary server entity events
-    local current = getAfflictionStrength(character, afflictionID)
-    if current >= strength * 0.5 then
-        MidiMod.DebugLog(string_format(
-            "[ServerBuff] Skipping %s (current=%.1f, threshold=%.1f)",
-            afflictionID, current, strength * 0.5))
-        return
-    end
-
-    pcall(function()
-        local prefab = AfflictionPrefab.Prefabs[afflictionID]
-        if prefab and character.CharacterHealth then
-            character.CharacterHealth.ApplyAffliction(
-                nil, prefab.Instantiate(strength), false)
-        end
-    end)
-end
+-- ─── BUFF SYSTEM (vanilla talent trigger) ───
+-- Vanilla instrument talents (steadytune/harmonica, melodicrespite/guitar)
+-- hook the OnUseRangedWeapon ability event — a real player triggers it by
+-- LMB-firing the instrument. We raise the same event directly, so all vanilla
+-- talent logic (charging affliction, item conditions, ally radius) runs as-is.
+-- Fired ~1/sec; charging (+2, max 12) reaches the 90% buff threshold in ~6s.
 
 if SERVER then
-    local serverTimers = {}
-    local _serverTime  = 0
+    local AbilityRangedWeapon = LuaUserData.CreateStatic(
+        "Barotrauma.Items.Components.AbilityRangedWeapon", true)
+
+    local playing = {} -- charID -> true
 
     Hook.Add("MidiMod.Server.BuffStart", "MidiMod.Server.HandleStart",
         function(charID, character)
-            if character then
-                serverTimers[charID] = {
-                    playStart = _serverTime,
-                    lastApply = 0
-                }
-                MidiMod.DebugLog("[ServerBuff] Tracking char " .. tostring(charID))
-            end
+            if character then playing[charID] = true end
         end)
 
     Hook.Add("MidiMod.Server.BuffStop", "MidiMod.Server.HandleStop",
-        function(charID)
-            serverTimers[charID] = nil
-            MidiMod.DebugLog("[ServerBuff] Stopped tracking char " .. tostring(charID))
-        end)
+        function(charID) playing[charID] = nil end)
 
+    local acc = 0
     Hook.Add("think", "MidiMod.Server.BuffApply", function(deltaTime)
-        _serverTime = _serverTime + (deltaTime or 0)
-        local now = _serverTime
+        acc = acc + (deltaTime or 0)
+        if acc < 1.0 then return end
+        acc = 0
 
-        for charID, timer in pairs(serverTimers) do
-            local playedEnough = (now - timer.playStart) >= REQUIRED_PLAY_SEC
-            local refreshReady = (now - timer.lastApply) >= SERVER_REFRESH
+        for charID in pairs(playing) do
+            local character = nil
+            pcall(function() character = Entity.FindEntityByID(charID) end)
 
-            if playedEnough and refreshReady then
-                local character = nil
-                pcall(function()
-                    character = Entity.FindEntityByID(charID)
-                end)
-
-                if character and not character.IsDead then
-                    for talentID, afflictionID in pairs(TALENT_BUFFS) do
-                        if hasTalentChar(character, talentID) then
-                            applyAffliction(character, afflictionID, BUFF_STRENGTH)
-                            MidiMod.DebugLog(string_format(
-                                "[ServerBuff] Applied %s to char %d",
-                                afflictionID, charID))
-                        end
-                    end
-                    timer.lastApply = now
-                else
-                    serverTimers[charID] = nil
+            if character and not character.IsDead then
+                local _, item = MidiMod.GetHeldInstrument(character)
+                if item then
+                    pcall(function()
+                        character.CheckTalents(
+                            AbilityEffectType.OnUseRangedWeapon,
+                            AbilityRangedWeapon.__new(item))
+                    end)
                 end
+            else
+                playing[charID] = nil
             end
         end
     end)
