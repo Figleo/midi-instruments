@@ -3,4 +3,16 @@
   <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>MIDI Volume</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>
   <entityname.guitarelectric>Electric guitar</entityname.guitarelectric>
   <entitydescription.guitarelectric>Just electric guitar</entitydescription.guitarelectric>
+  <midiplayer.title>MIDI Player</midiplayer.title>
+  <midiplayer.nofiles>No MIDI files found!
+Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
+  <midiplayer.search>Search:</midiplayer.search>
+  <midiplayer.refresh>Refresh</midiplayer.refresh>
+  <midiplayer.play>Play</midiplayer.play>
+  <midiplayer.stop>Stop</midiplayer.stop>
+  <midiplayer.talentbuffs>Talent Buffs</midiplayer.talentbuffs>
+  <midiplayer.ready>Ready  |  F5 to toggle</midiplayer.ready>
+  <midiplayer.loading>Loading...  |  F5 to hide</midiplayer.loading>
+  <midiplayer.playing>Playing...  |  F5 to hide</midiplayer.playing>
+  <midiplayer.volumehint>* Volume: Esc -&gt; Settings -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
 </infotexts>

@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<infotexts language="Russian" nowhitespace="false" translatedname="English">
+<infotexts language="Russian" nowhitespace="false" translatedname="Русский">
   <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>MIDI громкость</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>
   <entityname.guitarelectric>Электрогитара</entityname.guitarelectric>
   <entitydescription.guitarelectric>Просто электрогитара</entitydescription.guitarelectric>
+  <midiplayer.title>MIDI Плеер</midiplayer.title>
+  <midiplayer.nofiles>MIDI-файлы не найдены!
+Установите 'MIDI Storage' из Мастерской</midiplayer.nofiles>
+  <midiplayer.search>Поиск:</midiplayer.search>
+  <midiplayer.refresh>Обновить</midiplayer.refresh>
+  <midiplayer.play>Играть</midiplayer.play>
+  <midiplayer.stop>Стоп</midiplayer.stop>
+  <midiplayer.talentbuffs>Баффы талантов</midiplayer.talentbuffs>
+  <midiplayer.ready>Готово  |  F5 переключить</midiplayer.ready>
+  <midiplayer.loading>Загрузка...  |  F5 скрыть</midiplayer.loading>
+  <midiplayer.playing>Играет...  |  F5 скрыть</midiplayer.playing>
+  <midiplayer.volumehint>* Громкость: Esc -&gt; Настройки -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
 </infotexts>

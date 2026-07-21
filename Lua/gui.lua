@@ -29,6 +29,13 @@ local function getFileName(path)
     return string.match(path, "([^/\\]+)$") or path
 end
 
+-- Localized string by tag, falls back to the given text if the tag is missing.
+local function L(tag, fallback)
+    local ok, str = pcall(function() return TextManager.Get("midiplayer." .. tag).Value end)
+    if ok and str and str ~= "" then return str end
+    return fallback
+end
+
 -- ── UI state ──────────────────────────────────────────────────────────────────
 local frame                  = nil
 local panelFrame             = nil
@@ -148,7 +155,7 @@ local function createPanel()
 
     local titleText = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 1), titleDrag.RectTransform),
-        "♪ MIDI Player",
+        L("title", "MIDI Player"),
         nil, nil, GUI.Alignment.Center
     )
     titleText.TextColor = Color(120, 200, 255)
@@ -163,7 +170,7 @@ local function createPanel()
     if #MGUI.midiFiles == 0 then
         local noFiles     = GUI.TextBlock(
             GUI.RectTransform(Vector2(1, 0.20), contentList.Content.RectTransform),
-            "No MIDI files found!\nInstall 'MIDI Storage' from Workshop",
+            L("nofiles", "No MIDI files found!\nInstall 'MIDI Storage' from Workshop"),
             nil, nil, GUI.Alignment.Center
         )
         noFiles.TextColor = Color(255, 100, 100)
@@ -180,7 +187,7 @@ local function createPanel()
     -- ── Search label ──────────────────────────────────────────────────────────
     local searchLabel       = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
-        "Search:",
+        L("search", "Search:"),
         nil, nil, GUI.Alignment.CenterLeft
     )
     searchLabel.TextColor   = Color(160, 160, 160)
@@ -203,7 +210,7 @@ local function createPanel()
     -- Refresh button: rescans files from disk AND applies current search filter.
     local refreshBtn        = GUI.Button(
         GUI.RectTransform(Vector2(0.22, 1), searchRow.RectTransform, GUI.Anchor.CenterRight),
-        "↺ Refresh", GUI.Alignment.Center, "GUIButtonSmall"
+        L("refresh", "Refresh"), GUI.Alignment.Center, "GUIButtonSmall"
     )
     refreshBtn.OnClicked    = function()
         refreshFileList()
@@ -241,7 +248,7 @@ local function createPanel()
 
     local playBtn          = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterLeft),
-        "▶ Play", GUI.Alignment.Center, "GUIButtonSmall"
+        L("play", "Play"), GUI.Alignment.Center, "GUIButtonSmall"
     )
     playBtn.OnClicked      = function()
         if MGUI.selectedFile and MidiMod.Network then
@@ -252,7 +259,7 @@ local function createPanel()
 
     local stopBtn          = GUI.Button(
         GUI.RectTransform(Vector2(0.48, 1), actionRow.RectTransform, GUI.Anchor.CenterRight),
-        "■ Stop", GUI.Alignment.Center, "GUIButtonSmall"
+        L("stop", "Stop"), GUI.Alignment.Center, "GUIButtonSmall"
     )
     stopBtn.OnClicked      = function()
         if MidiMod.Network then
@@ -271,7 +278,7 @@ local function createPanel()
 
     local buffTick       = GUI.TickBox(
         GUI.RectTransform(Vector2(1, 1), buffRow.RectTransform, GUI.Anchor.CenterLeft),
-        "Talent Buffs"
+        L("talentbuffs", "Talent Buffs")
     )
     buffTick.Selected    = MidiMod.BuffsEnabled
     pcall(function()
@@ -305,7 +312,7 @@ local function createPanel()
     -- ── Status ────────────────────────────────────────────────────────────────
     statusLabel               = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.04), contentList.Content.RectTransform),
-        "Ready  |  F5 to toggle",
+        L("ready", "Ready  |  F5 to toggle"),
         nil, nil, GUI.Alignment.Center
     )
     statusLabel.TextColor     = Color(140, 140, 140)
@@ -313,7 +320,7 @@ local function createPanel()
     -- ── Hints ─────────────────────────────────────────────────────────────────
     local volHint             = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
-        "* Volume: Esc -> Settings -> Mod Gameplay Settings *",
+        L("volumehint", "* Volume: Esc -> Settings -> Mod Gameplay Settings *"),
         nil, nil, GUI.Alignment.Center
     )
     volHint.TextColor         = Color(100, 100, 100)
@@ -363,16 +370,16 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
             if MidiMod.MidiParser and MidiMod.MidiParser._parseState then
-                statusLabel.Text      = "Loading...  |  F5 to hide"
+                statusLabel.Text      = L("loading", "Loading...  |  F5 to hide")
                 statusLabel.TextColor = Color(255, 200, 50)
             elseif MidiMod.Player.playing then
-                statusLabel.Text      = "♪ Playing...  |  F5 to hide"
+                statusLabel.Text      = L("playing", "Playing...  |  F5 to hide")
                 statusLabel.TextColor = Color(100, 255, 140)
                 if MGUI.nowPlayingLabel and MidiMod.Player.currentFile then
                     MGUI.nowPlayingLabel.Text = getFileName(MidiMod.Player.currentFile)
                 end
             else
-                statusLabel.Text      = "Ready  |  F5 to toggle"
+                statusLabel.Text      = L("ready", "Ready  |  F5 to toggle")
                 statusLabel.TextColor = Color(140, 140, 140)
                 if MGUI.nowPlayingLabel then
                     MGUI.nowPlayingLabel.Text = ""
