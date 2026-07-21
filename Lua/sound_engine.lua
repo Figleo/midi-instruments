@@ -286,31 +286,33 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
 
     local channel = nil
 
+    -- Pass freqMult directly into Play so the pitch is set at channel creation.
+    -- SPW captures startPitch in the SoundChannel ctor; setting it afterwards
+    -- gets overwritten every tick when "Update Non-Looping Sounds" is enabled.
     if worldPos then
         local ok, ch = pcall(function()
-            return sound.Play(baseGain, SOUND_RANGE, Vector2(worldPos.X, worldPos.Y))
+            return sound.Play(baseGain, SOUND_RANGE, freqMult, Vector2(worldPos.X, worldPos.Y))
         end)
         if ok and ch then channel = ch end
     end
 
     if not channel then
         local ok, ch = pcall(function()
-            return sound.Play(baseGain, SOUND_RANGE)
+            return sound.Play(nil, baseGain, freqMult)
         end)
         if ok and ch then channel = ch end
     end
 
     if not channel then return nil end
 
-    -- Set pitch and positional properties in one guarded block
-    pcall(function()
-        channel.FrequencyMultiplier = freqMult
-        if worldPos then
+    -- Positional properties (pitch already set via Play above)
+    if worldPos then
+        pcall(function()
             channel.Near     = SOUND_NEAR
             channel.Far      = SOUND_RANGE
             channel.Position = Vector3(worldPos.X, worldPos.Y, 0)
-        end
-    end)
+        end)
+    end
 
     local uid = nextUID()
 
