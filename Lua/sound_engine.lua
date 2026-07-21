@@ -16,53 +16,57 @@ for note = 0, 127 do
     NOTE_NAME_CACHE[note] = NOTE_NAMES[(note % 12) + 1] .. octave
 end
 
-local string_format        = string.format
-local SAMPLE_MIN           = 24
-local SAMPLE_MAX           = 107
-local MAX_POLYPHONY        = 16
-local MAX_PER_SAMPLE       = 4
-local POOL_SIZE            = 2
-local MAX_NEW_PER_FRAME    = 12
-local LOAD_PER_FRAME       = 8
-local SOUND_RANGE          = 1000.0
-local SOUND_NEAR           = 35.0
+local string_format          = string.format
+local SAMPLE_MIN             = 24
+local SAMPLE_MAX             = 107
+local MAX_POLYPHONY          = 16
+local MAX_PER_SAMPLE         = 4
+local POOL_SIZE              = 2
+local MAX_NEW_PER_FRAME      = 12
+local LOAD_PER_FRAME         = 8
+local SOUND_RANGE            = 1000.0
+local SOUND_NEAR             = 35.0
 
-local FREQ_MIN             = 0.25
-local FREQ_MAX             = 4.0
+local FREQ_MIN               = 0.25
+local FREQ_MAX               = 4.0
 
 -- stopAll re-entry and debounce guards
-local _isStopping          = false
-local _lastStopAllTime     = 0
-local STOP_ALL_DEBOUNCE_MS = 50
+local _isStopping            = false
+local _lastStopAllTime       = 0
+local STOP_ALL_DEBOUNCE_MS   = 50
 
 -- cleanupDead throttle
-local _lastCleanupTime     = 0
-local CLEANUP_THROTTLE_MS  = 30
+local _lastCleanupTime       = 0
+local CLEANUP_THROTTLE_MS    = 30
 
-SoundEngine.soundBanks     = {}
-SoundEngine.soundBankIdx   = {}
-SoundEngine.activeChannels = {}
-SoundEngine.noteQueue      = {}
-SoundEngine.activeNoteUIDs = {}
-SoundEngine.notesThisFrame = 0
-SoundEngine.initialized    = false
+-- position tracking throttle (audio panning is imperceptible below ~10Hz)
+local _lastPosUpdateTime     = 0
+local POS_UPDATE_THROTTLE_MS = 50
+
+SoundEngine.soundBanks       = {}
+SoundEngine.soundBankIdx     = {}
+SoundEngine.activeChannels   = {}
+SoundEngine.noteQueue        = {}
+SoundEngine.activeNoteUIDs   = {}
+SoundEngine.notesThisFrame   = 0
+SoundEngine.initialized      = false
 
 -- Chunked loading state
-local _loadQueue           = nil
-local _loadIdx             = 1   -- index cursor; avoids O(n) tremove(1)
-local _loadDone            = false
-local _loadSamplesLoaded   = 0
-local _loadObjectsLoaded   = 0
+local _loadQueue             = nil
+local _loadIdx               = 1 -- index cursor; avoids O(n) tremove(1)
+local _loadDone              = false
+local _loadSamplesLoaded     = 0
+local _loadObjectsLoaded     = 0
 
-local pcall                = pcall
-local ipairs               = ipairs
-local pairs                = pairs
-local math_max             = math.max
-local math_min             = math.min
-local math_floor           = math.floor
-local os_clock             = os.clock
-local tinsert              = table.insert
-local tremove              = table.remove
+local pcall                  = pcall
+local ipairs                 = ipairs
+local pairs                  = pairs
+local math_max               = math.max
+local math_min               = math.min
+local math_floor             = math.floor
+local os_clock               = os.clock
+local tinsert                = table.insert
+local tremove                = table.remove
 
 -- ─── Helpers ───
 
@@ -83,8 +87,8 @@ function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
 
     local instruments = { "accordion", "guitar", "guitarelectric", "harmonica" }
-    _loadQueue = {}
-    _loadIdx   = 1
+    _loadQueue        = {}
+    _loadIdx          = 1
 
     for _, inst in ipairs(instruments) do
         SoundEngine.soundBanks[inst]   = {}
@@ -110,9 +114,9 @@ local function pumpLoadQueue()
     local processed = 0
     local qLen = #_loadQueue
     while _loadIdx <= qLen and processed < LOAD_PER_FRAME do
-        local job = _loadQueue[_loadIdx]
-        _loadIdx  = _loadIdx + 1
-        processed = processed + 1
+        local job        = _loadQueue[_loadIdx]
+        _loadIdx         = _loadIdx + 1
+        processed        = processed + 1
 
         local fileExists = false
         pcall(function()
@@ -148,7 +152,7 @@ local function pumpLoadQueue()
 
     if _loadIdx > qLen then
         _loadDone = true
-        _loadQueue = nil  -- allow GC
+        _loadQueue = nil -- allow GC
         SoundEngine.initialized = true
         MidiMod.Log(string.format(
             "[SoundEngine] Load complete: %d samples (%d objects).",
@@ -255,6 +259,64 @@ local function evictOldest()
     end
 end
 
+-- ─── Live position tracking ───
+-- Manually-played SoundChannels don't follow their source: Position is only
+-- what we set at Play time. For a sustained note the sound stays frozen where
+-- it was struck while the player (and the sub) move away. Each frame we
+-- re-resolve every positional channel's source and push the fresh WorldPosition
+-- onto the channel so the note follows its instrument.
+
+-- Resolve the current world position of a character's held instrument,
+-- falling back to the character's own position.
+local function resolveSourcePos(charID)
+    if not charID then return nil end
+    local character = nil
+    pcall(function() character = Entity.FindEntityByID(charID) end)
+    if not character then return nil end
+
+    local pos = nil
+    pcall(function()
+        local _, item = MidiMod.GetHeldInstrument(character)
+        if item then
+            pos = item.WorldPosition
+        else
+            pos = character.WorldPosition
+        end
+    end)
+    return pos
+end
+
+local function updatePositions()
+    local channels = SoundEngine.activeChannels
+    if #channels == 0 then return end
+
+    local now = os_clock() * 1000
+    if (now - _lastPosUpdateTime) < POS_UPDATE_THROTTLE_MS then return end
+    _lastPosUpdateTime = now
+
+    -- Cache one lookup per source this frame; a chord shares a charID.
+    local posCache = {}
+
+    for i = 1, #channels do
+        local info = channels[i]
+        if info.positional and info.charID then
+            local pos = posCache[info.charID]
+            if pos == nil then
+                pos = resolveSourcePos(info.charID)
+                -- false marks "looked up, none found" so we don't retry each channel
+                posCache[info.charID] = pos or false
+            end
+
+            if pos then
+                info.worldPos = pos
+                pcall(function()
+                    info.channel.Position = Vector3(pos.X, pos.Y, 0)
+                end)
+            end
+        end
+    end
+end
+
 -- ─── Play Note ───
 
 local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
@@ -323,7 +385,8 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         instrument = instrument,
         baseGain   = baseGain,
         worldPos   = worldPos,
-        charID     = charID
+        charID     = charID,
+        positional = worldPos ~= nil -- only 3D channels get live-tracked
     })
 
     -- Store UID in tracking table
@@ -369,26 +432,29 @@ end
 -- ─── Think Hook (client-only) ───
 
 if CLIENT then
-Hook.Add("think", "midi_sound_tick", function()
-    pumpLoadQueue()
+    Hook.Add("think", "midi_sound_tick", function()
+        pumpLoadQueue()
 
-    SoundEngine.notesThisFrame = 0
+        SoundEngine.notesThisFrame = 0
 
-    cleanupDead()
+        cleanupDead()
 
-    -- Drain note queue
-    local played = 0
-    while #SoundEngine.noteQueue > 0 and played < MAX_NEW_PER_FRAME do
-        local entry = tremove(SoundEngine.noteQueue, 1)
-        doPlayNote(entry.midiNote, entry.velocity, entry.worldPos, entry.instrument, entry.charID)
-        played = played + 1
-    end
+        -- Drain note queue
+        local played = 0
+        while #SoundEngine.noteQueue > 0 and played < MAX_NEW_PER_FRAME do
+            local entry = tremove(SoundEngine.noteQueue, 1)
+            doPlayNote(entry.midiNote, entry.velocity, entry.worldPos, entry.instrument, entry.charID)
+            played = played + 1
+        end
 
-    -- Cap queue size to prevent unbounded growth
-    while #SoundEngine.noteQueue > 48 do
-        tremove(SoundEngine.noteQueue, 1)
-    end
-end)
+        -- Cap queue size to prevent unbounded growth
+        while #SoundEngine.noteQueue > 48 do
+            tremove(SoundEngine.noteQueue, 1)
+        end
+
+        -- Keep sustained notes glued to their moving source
+        updatePositions()
+    end)
 end
 
 -- ─── Note Release / Stop ───
