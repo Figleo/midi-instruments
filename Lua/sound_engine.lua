@@ -41,7 +41,7 @@ local CLEANUP_THROTTLE_MS    = 30
 
 -- position tracking throttle (audio panning is imperceptible below ~10Hz)
 local _lastPosUpdateTime     = 0
-local POS_UPDATE_THROTTLE_MS = 50
+local POS_UPDATE_THROTTLE_MS = 10
 
 SoundEngine.soundBanks       = {}
 SoundEngine.soundBankIdx     = {}
