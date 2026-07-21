@@ -280,6 +280,17 @@ local function createPanel()
     buffTick.OnSelected       = function(tb)
         MidiMod.BuffsEnabled = tb.Selected
         MidiMod.DebugLog("[GUI] Buffs " .. (tb.Selected and "enabled" or "disabled"))
+        -- Apply live if currently streaming: tell the server to start/stop buffs now
+        if MidiMod.Player and MidiMod.Player.playing and MidiMod.Player.isStreamingHost then
+            local ch = MidiMod.Player.sourceCharacter
+            if ch and MidiMod.Network then
+                if tb.Selected then
+                    pcall(MidiMod.Network.notifyBuffStart, ch)
+                else
+                    pcall(MidiMod.Network.notifyBuffStop, ch)
+                end
+            end
+        end
         return true
     end
     -- ── Now playing ───────────────────────────────────────────────────────────
