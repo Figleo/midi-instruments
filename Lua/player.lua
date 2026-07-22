@@ -245,7 +245,7 @@ local function onThink(currentInst, currentItem)
     local now = getTimeMs()
     local elapsed = (now - Player.startTime) * Player.tempoMultiplier
     local streamBatch = {}
-    local batchOriginMs = nil  -- first event's timeMs in this batch
+    local batchOriginMs = nil -- first event's timeMs in this batch
 
     local charID = nil
     pcall(function() charID = Player.sourceCharacter.ID end)
@@ -414,7 +414,10 @@ if SERVER then
             local character = nil
             pcall(function() character = Entity.FindEntityByID(charID) end)
 
-            if character and not character.IsDead then
+            local isDead = true
+            local ok = pcall(function() isDead = character.IsDead end)
+
+            if character and ok and not isDead then
                 local _, item = MidiMod.GetHeldInstrument(character)
                 if item then
                     pcall(function()
