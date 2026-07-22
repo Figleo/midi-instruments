@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<contentpackage name="MIDI Instruments [WIP]" modversion="1.3.2" corepackage="False" steamworkshopid="3692939185" gameversion="1.13.4.0">
+<contentpackage name="MIDI Instruments [WIP]" modversion="1.3.3" corepackage="False" steamworkshopid="3692939185" gameversion="1.13.4.0">
   <Item file="%ModDir%/content/instrument_nosounds.xml" />
   <Item file="%ModDir%/content/instrument_new.xml" />
   <Text file="%ModDir%/Texts/English.xml" />
