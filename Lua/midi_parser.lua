@@ -15,7 +15,6 @@ local error        = error
 local io_open      = io.open
 local coroutine    = coroutine
 local os_clock     = os.clock
-local math_max     = math.max
 
 -- === Binary helpers ===
 
@@ -72,6 +71,12 @@ local function parseHeader(data, pos)
     if division >= 32768 then
         MidiMod.Log("Warning: SMPTE-based timing detected, defaulting to 480 ticks/quarter")
         ticksPerQuarter = 480
+    elseif division == 0 then
+        -- Every timeMs would be a division by zero, i.e. NaN. Nothing crashes,
+        -- but the whole score becomes uncomparable: getDurationMs returns NaN
+        -- and seek's binary search collapses to the first event.
+        MidiMod.Log("Warning: zero ticks/quarter in header, defaulting to 480")
+        ticksPerQuarter = 480
     end
 
     return {
@@ -90,7 +95,9 @@ local function parseTrack(data, pos, yieldFn)
 
     local trackLen
     trackLen, pos = readUint32(data, pos)
-    if trackLen <= 0 or trackLen > #data then
+    -- Length 0 is a legal empty MTrk that some editors emit as a placeholder;
+    -- it used to error out the whole file. Only reject lengths that cannot fit.
+    if trackLen > #data then
         error("[MidiParser] Invalid track length: " .. tostring(trackLen))
     end
 
@@ -168,14 +175,19 @@ local function parseTrack(data, pos, yieldFn)
 
             if metaType == 0x51 then
                 local b1, b2, b3 = sbyte(data, pos, pos + 2)
-                local usPerQuarter = b1 * 65536 + b2 * 256 + b3
-                evN = evN + 1
-                events[evN] = {
-                    tick = absTick,
-                    type = "tempo",
-                    usPerQuarter = usPerQuarter,
-                    bpm = mfloor(60000000 / usPerQuarter + 0.5),
-                }
+                local usPerQuarter = (b1 or 0) * 65536 + (b2 or 0) * 256 + (b3 or 0)
+                -- A zero tempo would freeze the timeline: every later event
+                -- would land on the same timeMs and the rest of the song would
+                -- fire as one block. Ignore it and keep the previous tempo.
+                if usPerQuarter > 0 then
+                    evN = evN + 1
+                    events[evN] = {
+                        tick = absTick,
+                        type = "tempo",
+                        usPerQuarter = usPerQuarter,
+                        bpm = mfloor(60000000 / usPerQuarter + 0.5),
+                    }
+                end
             elseif metaType == 0x2F then
                 pos = pos + metaLen
                 break
@@ -194,7 +206,11 @@ local function parseTrack(data, pos, yieldFn)
         if yieldFn then yieldFn() end
     end
 
-    return events, math_max(pos, trackEnd)
+    -- trackEnd, not pos: the spec says the next chunk starts exactly trackLen
+    -- bytes in, and the meta/sysex skips above are unbounded. Letting an
+    -- overshoot leak out here made one bad length inside a track reject every
+    -- LATER track too - "expected MTrk" on a chunk that was perfectly fine.
+    return events, trackEnd
 end
 
 -- === Merge & Score ===
