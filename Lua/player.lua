@@ -324,6 +324,11 @@ function Player.seek(targetMs)
 
     -- elapsed = (now - startTime) * tempoMultiplier  =>  shift startTime
     Player.startTime = getTimeMs() - targetMs / Player.tempoMultiplier
+
+    -- Force the next jam announce out immediately. Mirrors interpolate the
+    -- position we last announced, so without this their progress bars keep
+    -- creeping from the old spot for up to JAM_ANNOUNCE_SEC and then jump.
+    _lastJamAnnounce = 0
 end
 
 -- === AIM: Hold instrument via forced RMB input ===

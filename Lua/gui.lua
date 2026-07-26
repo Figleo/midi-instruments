@@ -563,6 +563,23 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
                     progressSlider.BarScroll = posMs / durationMs
                     progressTimeLabel.Text   = formatTime(posMs) .. " / " .. formatTime(durationMs)
                 end
+            elseif P.jamLeaderID and P.getJamProgress then
+                -- Mirroring: show the leader's progress, but read-only. We hold
+                -- no score, so there is nothing here we could seek in - the
+                -- position comes from the leader's periodic jam announce.
+                local jamPos, jamDur = P.getJamProgress()
+                if jamDur and jamDur > 0 then
+                    progressSlider.Enabled   = false
+                    progressSlider.BarScroll = jamPos / jamDur
+                    progressTimeLabel.Text   = formatTime(jamPos) .. " / " .. formatTime(jamDur)
+                else
+                    -- Leader has not announced progress yet (or is on an older
+                    -- version of the mod that does not send it)
+                    progressSlider.Enabled   = false
+                    progressSlider.BarScroll = 0
+                    progressTimeLabel.Text   = "0:00 / 0:00"
+                end
+                pendingSeekScroll = nil
             else
                 progressSlider.Enabled   = false
                 progressSlider.BarScroll = 0
