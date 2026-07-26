@@ -16,10 +16,8 @@ Player.currentFile         = nil
 Player.sourceCharacter     = nil
 Player.isStreamingHost     = false
 Player.instrumentDropped   = false
-Player.streamingCharacters = {} -- tracks remote players streaming to us
 
 local pcall                = pcall
-local ipairs               = ipairs
 local pairs                = pairs
 local math_max             = math.max
 local math_min             = math.min
@@ -28,7 +26,7 @@ local os_clock             = os.clock
 local tinsert              = table.insert
 local tconcat              = table.concat
 
--- ─── MIDI Loading ───
+-- === MIDI Loading ===
 
 function Player.loadScore(score, filePath)
     Player.stop()
@@ -43,7 +41,7 @@ function Player.loadScore(score, filePath)
     return true
 end
 
--- ─── Time ───
+-- === Time ===
 
 local function getTimeMs()
     if Timing and Timing.TotalTime then
@@ -52,7 +50,7 @@ local function getTimeMs()
     return os_clock() * 1000
 end
 
--- ─── Transport Controls ───
+-- === Transport Controls ===
 
 function Player.play(character)
     if not Player.score or #Player.score == 0 then
@@ -72,6 +70,17 @@ end
 
 function Player.stop()
     local wasPlaying = Player.playing
+
+    -- Get our own charID before the state is cleared. Stopping our song must
+    -- only cut our own notes, otherwise we also kill the notes other players
+    -- are streaming to us.
+    local charID = nil
+    pcall(function()
+        local ch = Player.sourceCharacter
+        if not ch and CLIENT then ch = Character.Controlled end
+        if ch then charID = ch.ID end
+    end)
+
     Player.playing = false
     Player.cursor = 1
     Player.sourceCharacter = nil
@@ -79,10 +88,14 @@ function Player.stop()
     Player.instrumentDropped = false
 
     if MidiMod.SoundEngine then
-        pcall(MidiMod.SoundEngine.stopAll)
+        if charID and MidiMod.SoundEngine.stopAllForChar then
+            pcall(MidiMod.SoundEngine.stopAllForChar, charID)
+        else
+            pcall(MidiMod.SoundEngine.stopAll)
+        end
     end
     if MidiMod.Network and MidiMod.Network.clearBuffer then
-        MidiMod.Network.clearBuffer()
+        pcall(MidiMod.Network.clearBuffer, charID)
     end
 
     if wasPlaying then
@@ -110,15 +123,13 @@ function Player.stopChar(charID)
     if MidiMod.Network and MidiMod.Network.clearBuffer then
         MidiMod.Network.clearBuffer(charID)
     end
-
-    Player.streamingCharacters[charID] = nil
 end
 
 function Player.setTempo(multiplier)
     Player.tempoMultiplier = math_max(0.25, math_min(4.0, multiplier))
 end
 
--- ─── Seek / Progress (used by the GUI slider) ───
+-- === Seek / Progress (used by the GUI slider) ===
 
 function Player.getDurationMs()
     local score = Player.score
@@ -153,7 +164,7 @@ function Player.seek(targetMs)
         pcall(MidiMod.Network.clearBuffer, charID)
     end
 
-    -- Remote listeners also skipped the "off" events — tell them to cut our
+    -- Remote listeners also skipped the "off" events - tell them to cut our
     -- sounding notes. NET_STOP on other clients only stops sounds for this
     -- charID; the notes we stream after the seek play normally.
     if Player.isStreamingHost and charID and not Game.IsSingleplayer then
@@ -162,7 +173,7 @@ function Player.seek(targetMs)
             msg.WriteUInt16(charID)
             Networking.Send(msg)
         end)
-        -- NET_STOP also fires BuffStop on the server — re-arm buffs since
+        -- NET_STOP also fires BuffStop on the server - re-arm buffs since
         -- we're still playing.
         if MidiMod.BuffsEnabled and MidiMod.Network and MidiMod.Network.notifyBuffStart then
             pcall(MidiMod.Network.notifyBuffStart, Player.sourceCharacter)
@@ -181,7 +192,7 @@ function Player.seek(targetMs)
     Player.startTime = getTimeMs() - targetMs / Player.tempoMultiplier
 end
 
--- ─── AIM: Hold instrument via forced RMB input ───
+-- === AIM: Hold instrument via forced RMB input ===
 -- Suppressed when LMB is used on an interactable target
 
 local inputAim = nil
@@ -227,7 +238,7 @@ local function forceAim(character)
     end)
 end
 
--- ─── Note Playback Logic ───
+-- === Note Playback Logic ===
 
 local function onThink(currentInst, currentItem)
     if not Player.playing then return end
@@ -308,9 +319,9 @@ local function onThink(currentInst, currentItem)
     end
 end
 
--- ─── Injection Points ───
+-- === Injection Points ===
 
--- ControlLocalPlayer fires every C# frame — most reliable for aim forcing
+-- ControlLocalPlayer fires every C# frame - most reliable for aim forcing
 pcall(function()
     Hook.Patch(
         "Barotrauma.Character",
@@ -325,17 +336,8 @@ pcall(function()
     MidiMod.DebugLog("[Player] ControlLocalPlayer.After patch applied")
 end)
 
--- Think hook: note playback + streaming tracker cleanup + aim backup
+-- Think hook: note playback + aim backup
 Hook.Add("think", "MidiMod.Player.Think", function()
-    local clockNow = os_clock()
-
-    -- Clean up stale streaming entries (remote players who stopped)
-    for charID, lastUpdate in pairs(Player.streamingCharacters) do
-        if clockNow - lastUpdate > 1.0 then
-            Player.streamingCharacters[charID] = nil
-        end
-    end
-
     if not Player.sourceCharacter or not Player.playing then
         return
     end
@@ -347,7 +349,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     pcall(function() isDead = ch.IsDead end)
     pcall(function() isUnconscious = ch.IsUnconscious end)
     if isDead or isUnconscious then
-        MidiMod.Log("Character incapacitated — stopping playback")
+        MidiMod.Log("Character incapacitated - stopping playback")
         if MidiMod.Network then
             pcall(MidiMod.Network.requestStop)
         else
@@ -355,11 +357,6 @@ Hook.Add("think", "MidiMod.Player.Think", function()
         end
         return
     end
-
-    -- Update streaming tracker for our own character
-    pcall(function()
-        Player.streamingCharacters[ch.ID] = clockNow
-    end)
 
     -- Fail-safe aim (backup for ControlLocalPlayer patch)
     forceAim(ch)
@@ -369,7 +366,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     if not currentInst then
         if not Player.instrumentDropped then
             Player.instrumentDropped = true
-            MidiMod.Log("Instrument dropped — stopping playback")
+            MidiMod.Log("Instrument dropped - stopping playback")
             if MidiMod.Network then
                 pcall(MidiMod.Network.requestStop)
             else
@@ -383,9 +380,9 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     onThink(currentInst, currentItem)
 end)
 
--- ─── BUFF SYSTEM (vanilla talent trigger) ───
+-- === BUFF SYSTEM (vanilla talent trigger) ===
 -- Vanilla instrument talents (steadytune/harmonica, melodicrespite/guitar)
--- hook the OnUseRangedWeapon ability event — a real player triggers it by
+-- hook the OnUseRangedWeapon ability event - a real player triggers it by
 -- LMB-firing the instrument. We raise the same event directly, so all vanilla
 -- talent logic (charging affliction, item conditions, ally radius) runs as-is.
 -- Fired ~1/sec; charging (+2, max 12) reaches the 90% buff threshold in ~6s.
