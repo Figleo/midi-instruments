@@ -37,13 +37,35 @@ function Network.init()
     if CLIENT then Network.initClient() end
 end
 
+-- The charID a client is allowed to act as: the one it actually controls.
+-- Never trust the charID on the wire - a modified client can put any value
+-- there and silence other players, make notes come out of their instrument,
+-- or claim arbitrary jam links. Returns nil for a client with no character,
+-- in which case the message is dropped (it cannot be playing anyway).
+local function senderCharID(client)
+    local id = nil
+    pcall(function() id = client.Character.ID end)
+    return id
+end
+
+-- One frame's worth of notes is a few dozen chars. Anything larger is either
+-- a bug or a client trying to make the server broadcast bulk data for it.
+local MAX_NOTES_STR = 512
+
 function Network.initServer()
     -- Relay notes from one client to all others
     Networking.Receive(NET_NOTES, function(message, client)
-        local charID   = message.ReadUInt16()
+        -- Fields must be read in order even when discarded, or the read
+        -- cursor desyncs from the message.
+        message.ReadUInt16()
         local notesStr = message.ReadString()
         local instrId  = "accordion"
         pcall(function() instrId = message.ReadString() end)
+
+        local charID = senderCharID(client)
+        if not charID then return end
+        if not notesStr or #notesStr > MAX_NOTES_STR then return end
+        if not MidiMod.Instruments[instrId] then instrId = "accordion" end
 
         -- One message object, sent to every other client
         local broadcast = Networking.Start(NET_NOTES)
@@ -60,8 +82,12 @@ function Network.initServer()
 
     -- Per-player stop: relay charID to other clients
     Networking.Receive(NET_STOP, function(message, client)
-        local charID = message.ReadUInt16()
-        MidiMod.DebugLog("Server: " .. client.Name .. " requests stop for char " .. tostring(charID))
+        message.ReadUInt16()
+        local charID = senderCharID(client)
+        if not charID then return end
+        -- No client.Name here: it is an un-pcall'd property access sitting in
+        -- front of the relay, and a throw would swallow the stop for everyone.
+        MidiMod.DebugLog("Server: stop requested for char " .. tostring(charID))
 
         local broadcast = Networking.Start(NET_STOP)
         broadcast.WriteUInt16(charID)
@@ -86,7 +112,9 @@ function Network.initServer()
     end)
 
     Networking.Receive(NET_BUFF_STOP, function(message, client)
-        local charID = message.ReadUInt16()
+        message.ReadUInt16()
+        local charID = senderCharID(client)
+        if not charID then return end
         Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
 end
