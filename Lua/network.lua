@@ -149,6 +149,13 @@ end
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
 
+    -- Never play our own stream back. On a listen server the host's own client
+    -- is in Client.ClientList, so the host receives the notes it just sent and
+    -- would play every note twice, 60ms apart through the jitter buffer.
+    local ourID = nil
+    pcall(function() ourID = Character.Controlled.ID end)
+    if ourID and ourID == charID then return end
+
     local character = nil
     pcall(function() character = Entity.FindEntityByID(charID) end)
 
