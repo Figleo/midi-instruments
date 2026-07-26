@@ -296,30 +296,21 @@ function Player.seek(targetMs)
     -- Skipped "off" events would otherwise never release them.
     local charID = nil
     pcall(function() charID = Player.sourceCharacter.ID end)
-    if MidiMod.SoundEngine then
-        if charID and MidiMod.SoundEngine.stopAllForChar then
-            pcall(MidiMod.SoundEngine.stopAllForChar, charID)
-        else
-            pcall(MidiMod.SoundEngine.stopAll)
-        end
-    end
-    if MidiMod.Network and MidiMod.Network.clearBuffer then
-        pcall(MidiMod.Network.clearBuffer, charID)
+    if charID then
+        Player.cutChar(charID)
+    elseif MidiMod.SoundEngine then
+        pcall(MidiMod.SoundEngine.stopAll)
     end
 
-    -- Remote listeners also skipped the "off" events - tell them to cut our
-    -- sounding notes. NET_STOP on other clients only stops sounds for this
-    -- charID; the notes we stream after the seek play normally.
+    -- Remote listeners skipped those "off" events too, so tell them to drop
+    -- our sounding notes. This used to reuse NET_STOP, which every mirror
+    -- reads as "the leader stopped" - moving the slider threw the whole band
+    -- out of the jam. NET_CUT only cuts the sound: jam links survive, the
+    -- server does not fire BuffStop, and the notes we stream after the jump
+    -- play normally.
     if Player.isStreamingHost and charID and not Game.IsSingleplayer then
-        pcall(function()
-            local msg = Networking.Start("MidiMod.Stop")
-            msg.WriteUInt16(charID)
-            Networking.Send(msg)
-        end)
-        -- NET_STOP also fires BuffStop on the server - re-arm buffs since
-        -- we're still playing.
-        if MidiMod.BuffsEnabled and MidiMod.Network and MidiMod.Network.notifyBuffStart then
-            pcall(MidiMod.Network.notifyBuffStart, Player.sourceCharacter)
+        if MidiMod.Network and MidiMod.Network.requestCut then
+            pcall(MidiMod.Network.requestCut, charID)
         end
     end
 

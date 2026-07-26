@@ -7,6 +7,9 @@ MidiMod.Network      = {}
 local Network        = MidiMod.Network
 
 local NET_STOP       = "MidiMod.Stop"
+-- Like NET_STOP but only silences: the performer is still playing, it just
+-- jumped in its score. Keeps jam links and buffs alive. See Player.seek.
+local NET_CUT        = "MidiMod.Cut"
 local NET_NOTES      = "MidiMod.Notes"
 local NET_BUFF_START = "MidiMod.BuffStart"
 local NET_BUFF_STOP  = "MidiMod.BuffStop"
@@ -112,6 +115,23 @@ function Network.initServer()
         Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
 
+    -- Seek: relay only. Deliberately does NOT call BuffStop - the performer
+    -- is still playing, so its talent buffs must keep charging.
+    Networking.Receive(NET_CUT, function(message, client)
+        message.ReadUInt16()
+        local charID = senderCharID(client)
+        if not charID then return end
+
+        local broadcast = Networking.Start(NET_CUT)
+        broadcast.WriteUInt16(charID)
+
+        for _, c in pairs(Client.ClientList) do
+            if c ~= client then
+                Networking.Send(broadcast, c.Connection)
+            end
+        end
+    end)
+
     -- Buff notifications
     Networking.Receive(NET_BUFF_START, function(message, client)
         local charID    = message.ReadUInt16()
@@ -182,6 +202,50 @@ function Network.initClient()
 
         if MidiMod.Player then
             MidiMod.Player.stopChar(charID)
+        end
+    end)
+
+    -- A performer seeked: drop its sounding notes but leave the jam intact
+    Networking.Receive(NET_CUT, function(message)
+        local charID = message.ReadUInt16()
+
+        -- Our own seek was already applied locally in Player.seek. On a listen
+        -- server this comes back to us and would cut the notes we started
+        -- after the jump. Same guard as playStreamedNotes.
+        local ourID = nil
+        pcall(function() ourID = Character.Controlled.ID end)
+        if ourID and ourID == charID then return end
+
+        if MidiMod.Player and MidiMod.Player.cutChar then
+            MidiMod.Player.cutChar(charID)
+        end
+    end)
+
+    -- Jam announce received: remember performers and who mirrors whom.
+    -- Entries expire in Player.getPerformers / cleanup.
+    Networking.Receive(NET_JAM, function(message)
+        local charID   = message.ReadUInt16()
+        local fileName = message.ReadString()
+        local mirrorOf = message.ReadUInt16() -- 0 = performer, else leader charID
+        local posSec   = message.ReadUInt16()
+        local durSec   = message.ReadUInt16()
+
+        if MidiMod.Player then
+            if mirrorOf == 0 then
+                MidiMod.Player.activePerformers[charID] = {
+                    fileName   = fileName,
+                    receivedAt = os_clock(),
+                    -- Progress at the moment this announce was sent; mirrors
+                    -- interpolate from receivedAt. See Player.getJamProgress.
+                    posMs      = posSec * 1000,
+                    durMs      = durSec * 1000,
+                }
+            else
+                MidiMod.Player.jamMirrors[charID] = {
+                    leaderID   = mirrorOf,
+                    receivedAt = os_clock(),
+                }
+            end
         end
     end)
 end
@@ -359,6 +423,55 @@ function Network.broadcastNotes(charID, notesStr, instrId)
     msg.WriteUInt16(charID)
     msg.WriteString(notesStr)
     msg.WriteString(instrId or "accordion")
+
+    if SERVER then
+        for _, c in pairs(Client.ClientList) do
+            Networking.Send(msg, c.Connection)
+        end
+    else
+        Networking.Send(msg)
+    end
+end
+
+-- Cut a performer's sounding notes everywhere without ending the performance.
+-- Used by Player.seek. NET_STOP would silence them too, but it also drops
+-- every mirror out of the band and fires BuffStop on the server.
+function Network.requestCut(charID)
+    if Game.IsSingleplayer or not charID then return end
+
+    local msg = Networking.Start(NET_CUT)
+    msg.WriteUInt16(charID)
+
+    if SERVER then
+        for _, c in pairs(Client.ClientList) do
+            Networking.Send(msg, c.Connection)
+        end
+    else
+        Networking.Send(msg)
+    end
+end
+
+-- Jam announce: performers say what they play (mirrorOf = 0), mirrors say
+-- whom they follow. Sent every couple of seconds while active.
+-- posSec/durSec carry the performer's progress so mirrors can show a progress
+-- bar; seconds in a UInt16 is plenty (18 hours) and mirrors interpolate
+-- locally between announces. Mirrors themselves send 0/0.
+local function clampU16(v)
+    v = tonumber(v) or 0
+    if v < 0 then return 0 end
+    if v > 65535 then return 65535 end
+    return math.floor(v)
+end
+
+function Network.broadcastJamAnnounce(charID, fileName, mirrorOf, posSec, durSec)
+    if Game.IsSingleplayer then return end
+
+    local msg = Networking.Start(NET_JAM)
+    msg.WriteUInt16(charID)
+    msg.WriteString(fileName or "")
+    msg.WriteUInt16(mirrorOf or 0)
+    msg.WriteUInt16(clampU16(posSec))
+    msg.WriteUInt16(clampU16(durSec))
 
     if SERVER then
         for _, c in pairs(Client.ClientList) do
