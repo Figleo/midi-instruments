@@ -142,14 +142,14 @@ if xmlVol then
     MidiMod.Log("Volume loaded from settings: " .. MidiMod.CurrentVolume)
 end
 
--- Poll volume changes periodically (client only, every ~5 seconds)
+-- Poll volume changes periodically (client only, every ~1 second)
 if CLIENT then
     local lastKnownVolume = MidiMod.CurrentVolume
     local checkCounter = 0
 
     Hook.Add("think", "midi_live_config", function()
         checkCounter = checkCounter + 1
-        if checkCounter % 300 ~= 0 then return end
+        if checkCounter % 60 ~= 0 then return end
 
         local vol = readVolumeFromXML()
         if vol and math.abs(vol - lastKnownVolume) > 0.001 then
