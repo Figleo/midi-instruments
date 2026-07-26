@@ -60,15 +60,13 @@ local _loadObjectsLoaded     = 0
 
 local pcall                  = pcall
 local ipairs                 = ipairs
-local pairs                  = pairs
 local math_max               = math.max
 local math_min               = math.min
-local math_floor             = math.floor
 local os_clock               = os.clock
 local tinsert                = table.insert
 local tremove                = table.remove
 
--- ─── Helpers ───
+-- === Helpers ===
 
 local function noteToName(midiNote)
     return NOTE_NAME_CACHE[midiNote] or "C-1"
@@ -81,7 +79,7 @@ local function nextUID()
     return _channelUidCounter
 end
 
--- ─── Chunked Loading ───
+-- === Chunked Loading ===
 
 function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
@@ -192,7 +190,7 @@ local function findClosestSample(midiNote, bank)
     return nil, 1.0
 end
 
--- ─── Channel lifecycle ───
+-- === Channel lifecycle ===
 
 local function safeAlive(ch)
     if not ch then return false end
@@ -213,6 +211,15 @@ local function removeChannelAt(idx, fade)
     local info = SoundEngine.activeChannels[idx]
     if info then
         safeDisposeChannelObject(info.channel, fade)
+
+        -- Also drop the UID entry. Voice stealing, polyphony eviction and dead
+        -- cleanup kill channels without going through releaseNote, so without
+        -- this a stale uid stays in the table and the next releaseNote for the
+        -- same note looks for a channel that no longer exists.
+        local tracked = info.charID and SoundEngine.activeNoteUIDs[info.charID]
+        if tracked and tracked[info.note] == info.uid then
+            tracked[info.note] = nil
+        end
     end
     tremove(SoundEngine.activeChannels, idx)
 end
@@ -259,7 +266,7 @@ local function evictOldest()
     end
 end
 
--- ─── Live position tracking ───
+-- === Live position tracking ===
 -- Manually-played SoundChannels don't follow their source: Position is only
 -- what we set at Play time. For a sustained note the sound stays frozen where
 -- it was struck while the player (and the sub) move away. Each frame we
@@ -308,7 +315,6 @@ local function updatePositions()
             end
 
             if pos then
-                info.worldPos = pos
                 pcall(function()
                     info.channel.Position = Vector3(pos.X, pos.Y, 0)
                 end)
@@ -317,7 +323,7 @@ local function updatePositions()
     end
 end
 
--- ─── Play Note ───
+-- === Play Note ===
 
 local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local bank = SoundEngine.soundBanks[instrument]
@@ -325,6 +331,8 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         bank = SoundEngine.soundBanks["accordion"]
         instrument = "accordion"
     end
+    -- Both banks empty: samples are still loading. Skip the note.
+    if not bank or not next(bank) then return nil end
 
     local sampleNote, freqMult = findClosestSample(midiNote, bank)
     if not sampleNote then return nil end
@@ -341,9 +349,11 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local sound = getNextSound(instrument, sampleNote)
     if not sound then return nil end
 
-    -- Volume: velocity scaled by user volume setting
+    -- Velocity scaled by the user volume setting. velGain is stored on the
+    -- channel so refreshVolume() can rescale notes that are already playing.
     local volumeMult = MidiMod.CurrentVolume or 1.0
-    local baseGain = math_min(1.0, (velocity / 127)) * volumeMult
+    local velGain = math_min(1.0, (velocity / 127))
+    local baseGain = velGain * volumeMult
 
     local channel = nil
 
@@ -383,8 +393,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         note       = midiNote,
         sampleNote = sampleNote,
         instrument = instrument,
-        baseGain   = baseGain,
-        worldPos   = worldPos,
+        velGain    = velGain,
         charID     = charID,
         positional = worldPos ~= nil -- only 3D channels get live-tracked
     })
@@ -429,7 +438,7 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     return nil, nil
 end
 
--- ─── Think Hook (client-only) ───
+-- === Think Hook (client-only) ===
 
 if CLIENT then
     Hook.Add("think", "midi_sound_tick", function()
@@ -457,10 +466,22 @@ if CLIENT then
     end)
 end
 
--- ─── Note Release / Stop ───
+-- Rescale notes that are already playing after the volume setting changes.
+-- Without this a long note keeps the volume it started with.
+function SoundEngine.refreshVolume()
+    local volumeMult = MidiMod.CurrentVolume or 1.0
+    for i = 1, #SoundEngine.activeChannels do
+        local info = SoundEngine.activeChannels[i]
+        if info.velGain then
+            pcall(function() info.channel.Gain = info.velGain * volumeMult end)
+        end
+    end
+end
+
+-- === Note Release / Stop ===
 
 -- Release a note: gentle fade-out (noteOff from MIDI)
--- Only stops the oldest instance of this note — allows overlapping same-note sounds
+-- Only stops the oldest instance of this note - allows overlapping same-note sounds
 local NOTE_RELEASE_FADE = 0.08 -- 80ms fade, smooth without clicks
 
 function SoundEngine.releaseNote(midiNote, charID)
