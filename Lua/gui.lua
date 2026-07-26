@@ -7,7 +7,6 @@ MidiMod.GUI                = {}
 
 local MGUI                 = MidiMod.GUI
 
-MGUI.panel                 = nil
 MGUI.isOpen                = false
 MGUI.midiFiles             = {}
 MGUI.selectedFile          = nil
@@ -17,7 +16,10 @@ local wasHoldingInstrument = false
 local function refreshFileList()
     MGUI.midiFiles = {}
     if MidiMod and MidiMod.MidiParser then
-        MidiMod.MidiParser.clearCache()
+        -- No clearCache here: this runs every time the panel opens, and a full
+        -- clear would reparse every file from scratch on each instrument pickup.
+        -- Replaced files are caught anyway - the parser compares the cached file
+        -- size against the disk before using a cached score.
         local ok, files = pcall(MidiMod.MidiParser.listMidiFiles)
         if ok and files then
             MGUI.midiFiles = files
@@ -36,7 +38,7 @@ local function L(tag, fallback)
     return fallback
 end
 
--- ── UI state ──────────────────────────────────────────────────────────────────
+-- === UI state ===
 local frame                  = nil
 local panelFrame             = nil
 local statusLabel            = nil
@@ -57,7 +59,7 @@ local function formatTime(ms)
     return string.format("%d:%02d", math.floor(totalSec / 60), totalSec % 60)
 end
 
--- ── File list builder ─────────────────────────────────────────────────────────
+-- === File list builder ===
 local function rebuildFileList(searchText)
     if not fileListBox then return end
 
@@ -105,7 +107,7 @@ local function rebuildFileList(searchText)
     end
 end
 
--- ── Panel lifecycle ───────────────────────────────────────────────────────────
+-- === Panel lifecycle ===
 local function destroyPanel()
     if frame then
         pcall(function() frame.Visible = false end)
@@ -119,7 +121,6 @@ local function destroyPanel()
     progressSlider    = nil
     progressTimeLabel = nil
     pendingSeekScroll = nil
-    MGUI.panel        = nil
     MGUI.isOpen       = false
 end
 
@@ -132,11 +133,11 @@ local function createPanel()
     destroyPanel()
     refreshFileList()
 
-    -- ── Root overlay ──────────────────────────────────────────────────────────
+    -- === Root overlay ===
     frame = GUI.Frame(GUI.RectTransform(Vector2(1, 1)), nil)
     frame.CanBeFocused = false
 
-    -- ── Main window ───────────────────────────────────────────────────────────
+    -- === Main window ===
     local panelW, panelH = 360, 600
     panelFrame = GUI.Frame(
         GUI.RectTransform(Point(panelW, panelH), frame.RectTransform, GUI.Anchor.BottomRight),
@@ -151,7 +152,7 @@ local function createPanel()
         end)
     end
 
-    -- ── Title / drag handle ───────────────────────────────────────────────────
+    -- === Title / drag handle ===
     local titleDrag = GUI.DragHandle(
         GUI.RectTransform(Vector2(1, 0.10), panelFrame.RectTransform, GUI.Anchor.TopCenter),
         panelFrame.RectTransform,
@@ -174,13 +175,13 @@ local function createPanel()
     )
     titleText.TextColor = Color(120, 200, 255)
 
-    -- ── Outer content list ────────────────────────────────────────────────────
+    -- === Outer content list ===
     local contentList = GUI.ListBox(
         GUI.RectTransform(Vector2(0.93, 0.88), panelFrame.RectTransform, GUI.Anchor.BottomCenter)
     )
     contentList.RectTransform.AbsoluteOffset = Point(0, 6)
 
-    -- ── No-files fallback ─────────────────────────────────────────────────────
+    -- === No-files fallback ===
     if #MGUI.midiFiles == 0 then
         local noFiles     = GUI.TextBlock(
             GUI.RectTransform(Vector2(1, 0.20), contentList.Content.RectTransform),
@@ -189,7 +190,6 @@ local function createPanel()
         )
         noFiles.TextColor = Color(255, 100, 100)
         noFiles.Wrap      = true
-        MGUI.panel        = frame
         MGUI.isOpen       = true
         return
     end
@@ -198,7 +198,7 @@ local function createPanel()
         MGUI.selectedFile = MGUI.midiFiles[1]
     end
 
-    -- ── Search label ──────────────────────────────────────────────────────────
+    -- === Search label ===
     local searchLabel       = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
         L("search", "Search:"),
@@ -207,7 +207,7 @@ local function createPanel()
     searchLabel.TextColor   = Color(160, 160, 160)
     searchLabel.Padding     = Vector4(4, 0, 0, 0)
 
-    -- ── Search row: [TextBox.......] [↺] ─────────────────────────────────────
+    -- === Search row: [TextBox.......] [Refresh] ===
     local searchRow         = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.09), contentList.Content.RectTransform),
         nil
@@ -227,6 +227,9 @@ local function createPanel()
         L("refresh", "Refresh"), GUI.Alignment.Center, "GUIButtonSmall"
     )
     refreshBtn.OnClicked    = function()
+        -- User asked for a refresh, so drop parsed scores too. This is what
+        -- picks up a .mid file that was edited while the game was running.
+        pcall(MidiMod.MidiParser.clearCache)
         refreshFileList()
         local stillExists = false
         for _, p in ipairs(MGUI.midiFiles) do
@@ -239,14 +242,14 @@ local function createPanel()
         return true
     end
 
-    -- ── Scrollable file list ──────────────────────────────────────────────────
+    -- === Scrollable file list ===
     fileListBox             = GUI.ListBox(
         GUI.RectTransform(Vector2(1, 0.48), contentList.Content.RectTransform)
     )
 
     rebuildFileList(lastSearch)
 
-    -- ── Progress slider: [0:42] [====|-----] [3:15] ──────────────────────────
+    -- === Progress slider: [0:42] [====|-----] [3:15] ===
     local progressRow           = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
         nil
@@ -271,14 +274,7 @@ local function createPanel()
         return true
     end
 
-    ---- ── Divider ───────────────────────────────────────────────────────────────
-    --local divider          = GUI.Frame(
-    --    GUI.RectTransform(Vector2(1, 0.01), contentList.Content.RectTransform),
-    --    "HorizontalLine"
-    --)
-    --divider.CanBeFocused   = false
-
-    -- ── Play / Stop ───────────────────────────────────────────────────────────
+    -- === Play / Stop ===
     local actionRow             = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
         nil
@@ -307,7 +303,7 @@ local function createPanel()
         return true
     end
 
-    -- ── Buff toggle ───────────────────────────────────────────────────────────
+    -- === Buff toggle ===
     local buffRow               = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
         nil
@@ -338,7 +334,7 @@ local function createPanel()
         end
         return true
     end
-    -- ── Now playing ───────────────────────────────────────────────────────────
+    -- === Now playing ===
     local nowPlayingLabel     = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
         "",
@@ -347,7 +343,7 @@ local function createPanel()
     nowPlayingLabel.TextColor = Color(100, 255, 140)
     nowPlayingLabel.Wrap      = true
 
-    -- ── Status ────────────────────────────────────────────────────────────────
+    -- === Status ===
     statusLabel               = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.04), contentList.Content.RectTransform),
         L("ready", "Ready  |  F5 to toggle"),
@@ -355,7 +351,7 @@ local function createPanel()
     )
     statusLabel.TextColor     = Color(140, 140, 140)
 
-    -- ── Hints ─────────────────────────────────────────────────────────────────
+    -- === Hints ===
     local volHint             = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
         L("volumehint", "* Volume: Esc -> Settings -> Mod Gameplay Settings *"),
@@ -365,24 +361,23 @@ local function createPanel()
     volHint.Wrap              = true
 
     MGUI.nowPlayingLabel      = nowPlayingLabel
-    MGUI.panel                = frame
     MGUI.isOpen               = true
 end
 
--- ── Public toggle ─────────────────────────────────────────────────────────────
+-- === Public toggle ===
 function MGUI.togglePanel(show)
     if show == nil then show = not MGUI.isOpen end
     if show then createPanel() else destroyPanel() end
 end
 
--- ── GUI draw hook ─────────────────────────────────────────────────────────────
+-- === GUI draw hook ===
 Hook.Patch("Barotrauma.GameScreen", "AddToGUIUpdateList", function()
     if frame and MGUI.isOpen then
         frame.AddToGUIUpdateList()
     end
 end)
 
--- ── Think hook ────────────────────────────────────────────────────────────────
+-- === Think hook ===
 Hook.Add("think", "MidiMod.GUI.Think", function()
     local ch         = Character.Controlled
     local holdingNow = ch and MidiMod.IsHoldingInstrument(ch) or false
@@ -404,7 +399,7 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
         end
     end
 
-    -- ── Update status label only ───────────────────────────────────────────────
+    -- === Update status label only ===
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
             if MidiMod.MidiParser and MidiMod.MidiParser._parseState then
@@ -426,7 +421,7 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
         end)
     end
 
-    -- ── Progress slider ────────────────────────────────────────────────────────
+    -- === Progress slider ===
     if MGUI.isOpen and progressSlider and MidiMod.Player then
         pcall(function()
             local P = MidiMod.Player
