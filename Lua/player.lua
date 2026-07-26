@@ -17,6 +17,30 @@ Player.sourceCharacter     = nil
 Player.isStreamingHost     = false
 Player.instrumentDropped   = false
 
+-- Jam (play together): performers we could mirror, fed by NET_JAM announces.
+-- Only real performers (with a local file) are listed - mirrors are not.
+-- charID -> { fileName, receivedAt }
+Player.activePerformers    = {}
+-- Who mirrors whom, fed by the same announces. All clients need this map to
+-- duplicate a leader's note stream onto each mirror's instrument.
+-- mirrorCharID -> { leaderID, receivedAt }
+Player.jamMirrors          = {}
+-- Leader we mirror ourselves; nil when not mirroring. The mod holds no score
+-- in mirror mode - the leader's stream is our sheet music. When the leader's
+-- stop arrives we stop too.
+Player.jamLeaderID         = nil
+
+-- How long an announce entry stays valid without a refresh
+local PERFORMER_TTL_SEC    = 5.0
+-- How often we announce our own playback / mirroring
+local JAM_ANNOUNCE_SEC     = 2.0
+local _lastJamAnnounce     = 0
+-- A mirror gives up on its leader after this long without an announce. The
+-- leader left, crashed or its mod died - no NET_STOP is ever coming, so this
+-- is the only thing that can end the session. Three announce intervals, so a
+-- couple of lost packets do not kick a mirror out of a live jam.
+local LEADER_LOST_SEC      = JAM_ANNOUNCE_SEC * 3
+
 local pcall                = pcall
 local pairs                = pairs
 local math_max             = math.max
@@ -86,6 +110,7 @@ function Player.stop()
     Player.sourceCharacter = nil
     Player.isStreamingHost = false
     Player.instrumentDropped = false
+    Player.jamLeaderID = nil
 
     if MidiMod.SoundEngine then
         if charID and MidiMod.SoundEngine.stopAllForChar then
@@ -105,6 +130,10 @@ end
 
 -- Per-player stop: for network, stops sounds from a specific remote character
 function Player.stopChar(charID)
+    -- They are no longer performing / mirroring
+    Player.activePerformers[charID] = nil
+    Player.jamMirrors[charID] = nil
+
     -- If this is our own character, do a full stop
     if Player.sourceCharacter then
         local ourID = nil
@@ -113,6 +142,19 @@ function Player.stopChar(charID)
             Player.stop()
             return
         end
+    end
+
+    -- Cascade: the leader we mirror stopped, so we stop too. Clear
+    -- jamLeaderID BEFORE requestStop - our own stop comes back through here
+    -- and must not loop. Our requestStop notifies the rest as a normal
+    -- NET_STOP, so they cut our sounds and drop us from their mirror maps.
+    if Player.jamLeaderID and Player.jamLeaderID == charID then
+        Player.jamLeaderID = nil
+        MidiMod.Log("Jam leader stopped - stopping")
+        if MidiMod.Network then
+            pcall(MidiMod.Network.requestStop)
+        end
+        -- Fall through: still cut the leader's sounds below
     end
 
     -- Otherwise just stop all sounds for that remote character
@@ -127,6 +169,107 @@ end
 
 function Player.setTempo(multiplier)
     Player.tempoMultiplier = math_max(0.25, math_min(4.0, multiplier))
+end
+
+-- === Jam (play together) ===
+
+-- Live performers we can mirror: expired entries are dropped, our own
+-- character is skipped. Returns charID -> entry (same tables as
+-- activePerformers, do not mutate).
+function Player.getPerformers()
+    local now = os_clock()
+    local ourID = nil
+    pcall(function()
+        local ch = Character.Controlled
+        if ch then ourID = ch.ID end
+    end)
+
+    local result = {}
+    for charID, entry in pairs(Player.activePerformers) do
+        if (now - entry.receivedAt) > PERFORMER_TTL_SEC then
+            Player.activePerformers[charID] = nil
+        elseif charID ~= ourID then
+            result[charID] = entry
+        end
+    end
+    return result
+end
+
+-- Characters currently mirroring leaderID, as an array of charIDs.
+-- Expired mirror entries are dropped on the way.
+function Player.getMirrorsOf(leaderID)
+    local now = os_clock()
+    local result = nil
+    for charID, entry in pairs(Player.jamMirrors) do
+        if (now - entry.receivedAt) > PERFORMER_TTL_SEC then
+            Player.jamMirrors[charID] = nil
+        elseif entry.leaderID == leaderID then
+            result = result or {}
+            result[#result + 1] = charID
+        end
+    end
+    return result
+end
+
+-- Progress of the leader we mirror, as posMs, durMs. Returns nil when we are
+-- not mirroring or the leader has not reported a duration yet.
+--
+-- The leader announces its progress once every JAM_ANNOUNCE_SEC, so between
+-- announces we advance the reported position by our own elapsed time. That
+-- keeps the bar moving smoothly and resyncs on every announce. Tempo is not
+-- factored in: it is always 1.0 in practice, and a resync every couple of
+-- seconds bounds any drift anyway.
+function Player.getJamProgress()
+    local leaderID = Player.jamLeaderID
+    if not leaderID then return nil end
+
+    local entry = Player.activePerformers[leaderID]
+    if not entry or not entry.durMs or entry.durMs <= 0 then return nil end
+
+    local elapsedMs = (os_clock() - entry.receivedAt) * 1000
+    local posMs = math_min((entry.posMs or 0) + elapsedMs, entry.durMs)
+    return math_max(0, posMs), entry.durMs
+end
+
+-- Cut everything currently sounding for a character, without touching jam
+-- links, buffs or playback state. This is what a seek needs: the "off" events
+-- for the notes sounding right now sit on the other side of the jump and are
+-- skipped, so those notes would hang forever - but the performer is still
+-- playing and the band must stay together.
+function Player.cutChar(charID)
+    if not charID then return end
+
+    local ourID = nil
+    pcall(function() ourID = Character.Controlled.ID end)
+
+    local function cut(id)
+        if MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
+            pcall(MidiMod.SoundEngine.stopAllForChar, id)
+        end
+        if MidiMod.Network and MidiMod.Network.clearBuffer then
+            pcall(MidiMod.Network.clearBuffer, id)
+        end
+    end
+
+    cut(charID)
+
+    -- The performer's notes are duplicated onto every mirror's instrument,
+    -- so those copies hang too and have to go with them. Our own id is
+    -- handled below, charID is already done.
+    local mirrors = Player.getMirrorsOf(charID)
+    if mirrors then
+        for i = 1, #mirrors do
+            local mID = mirrors[i]
+            if mID ~= charID and mID ~= ourID then cut(mID) end
+        end
+    end
+
+    -- If we mirror this performer ourselves we are missing from the list
+    -- above: our own jam announce is never relayed back to us. Same asymmetry
+    -- that Network.playStreamedNotes works around when building its targets.
+    if Player.jamLeaderID == charID and ourID and ourID ~= charID then
+        cut(ourID)
+    end
 end
 
 -- === Seek / Progress (used by the GUI slider) ===
@@ -265,6 +408,29 @@ local function onThink(currentInst, currentItem)
     local cursor = Player.cursor
     local scoreLen = #score
 
+    -- Characters mirroring us: our own client never receives our NET_NOTES
+    -- back, so we duplicate our notes onto the mirrors right here.
+    local mirrors = nil
+    if charID then
+        mirrors = Player.getMirrorsOf(charID)
+    end
+    local mirrorTargets = nil
+    if mirrors then
+        mirrorTargets = {}
+        for i = 1, #mirrors do
+            local mChar = nil
+            pcall(function() mChar = Entity.FindEntityByID(mirrors[i]) end)
+            if mChar then
+                local mInst, mItem = MidiMod.GetHeldInstrument(mChar)
+                if mInst then
+                    local mPos = nil
+                    pcall(function() mPos = mItem.WorldPosition end)
+                    mirrorTargets[#mirrorTargets + 1] = { id = mirrors[i], inst = mInst, pos = mPos }
+                end
+            end
+        end
+    end
+
     while cursor <= scoreLen do
         local event = score[cursor]
         if event.timeMs <= elapsed then
@@ -273,6 +439,12 @@ local function onThink(currentInst, currentItem)
             if evType == "on" then
                 if MidiMod.SoundEngine then
                     pcall(MidiMod.SoundEngine.playNote, event.note, event.velocity, worldPos, currentInst, charID)
+                    if mirrorTargets then
+                        for i = 1, #mirrorTargets do
+                            local t = mirrorTargets[i]
+                            pcall(MidiMod.SoundEngine.playNote, event.note, event.velocity, t.pos, t.inst, t.id)
+                        end
+                    end
                 end
                 if Player.isStreamingHost then
                     if not batchOriginMs then batchOriginMs = event.timeMs end
@@ -282,6 +454,11 @@ local function onThink(currentInst, currentItem)
             elseif evType == "off" then
                 if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
                     pcall(MidiMod.SoundEngine.releaseNote, event.note, charID)
+                    if mirrorTargets then
+                        for i = 1, #mirrorTargets do
+                            pcall(MidiMod.SoundEngine.releaseNote, event.note, mirrorTargets[i].id)
+                        end
+                    end
                 end
                 if Player.isStreamingHost then
                     if not batchOriginMs then batchOriginMs = event.timeMs end
@@ -303,6 +480,22 @@ local function onThink(currentInst, currentItem)
         local notesStr = tconcat(streamBatch, ";")
         if MidiMod.Network and MidiMod.Network.broadcastNotes then
             pcall(MidiMod.Network.broadcastNotes, charID, notesStr, currentInst)
+        end
+    end
+
+    -- Announce "we perform file X" so others see us in the jam list.
+    -- Only the file name goes over the wire, purely as a label.
+    if Player.isStreamingHost and charID and Player.currentFile then
+        local clockNow = os_clock()
+        if (clockNow - _lastJamAnnounce) >= JAM_ANNOUNCE_SEC then
+            _lastJamAnnounce = clockNow
+            if MidiMod.Network and MidiMod.Network.broadcastJamAnnounce then
+                local fileName = string.match(Player.currentFile, "([^/\\]+)$") or Player.currentFile
+                -- Progress rides along so mirrors can draw a progress bar
+                pcall(MidiMod.Network.broadcastJamAnnounce, charID, fileName, 0,
+                    math_floor(Player.getPositionMs() / 1000),
+                    math_floor(Player.getDurationMs() / 1000))
+            end
         end
     end
 
@@ -336,8 +529,80 @@ pcall(function()
     MidiMod.DebugLog("[Player] ControlLocalPlayer.After patch applied")
 end)
 
+-- Mirror mode think: we have no score, we just follow a leader. Keep the
+-- RMB pose, re-announce the mirror link, stop on the usual conditions.
+local function mirrorThink()
+    local ch = Character.Controlled
+    if not ch then
+        -- No character to mirror with: round ended, spectating, respawning.
+        -- Returning here would park the think hook on the mirror branch
+        -- forever - status stuck on "Playing together" and the whole jam list
+        -- suppressed, with no way out but a manual Stop. Nobody can be
+        -- notified without a character, so just tear down locally.
+        Player.jamLeaderID = nil
+        Player.stop()
+        return
+    end
+
+    local charID = nil
+    pcall(function() charID = ch.ID end)
+
+    -- Same stop conditions as normal playback
+    local isDead, isUnconscious = false, false
+    pcall(function() isDead = ch.IsDead end)
+    pcall(function() isUnconscious = ch.IsUnconscious end)
+    local currentInst = MidiMod.GetHeldInstrument(ch)
+
+    if isDead or isUnconscious or not currentInst then
+        MidiMod.Log("Mirror interrupted - stopping")
+        Player.jamLeaderID = nil
+        if MidiMod.Network then
+            pcall(MidiMod.Network.requestStop)
+        end
+        return
+    end
+
+    -- The leader stopped announcing: it disconnected, crashed, or its mod
+    -- died. Its NET_STOP is never arriving, and nothing else ends a mirror -
+    -- we would stand in the playing pose, silent, in "Playing together"
+    -- until the player hits Stop by hand.
+    local leaderID    = Player.jamLeaderID
+    local leaderEntry = Player.activePerformers[leaderID]
+    if not leaderEntry or (os_clock() - leaderEntry.receivedAt) > LEADER_LOST_SEC then
+        MidiMod.Log("Jam leader is gone - stopping")
+        -- Clear the link BEFORE requesting our own stop, same as the cascade
+        -- in stopChar: our stop echoes back through stopChar and must not loop.
+        Player.jamLeaderID = nil
+        if MidiMod.Network then
+            pcall(MidiMod.Network.requestStop)
+        end
+        -- Drop the leader from the jam list and cut whatever of its notes is
+        -- still sounding or sitting in the jitter buffer.
+        Player.stopChar(leaderID)
+        return
+    end
+
+    forceAim(ch)
+
+    -- Re-announce so late joiners and packet loss do not break the link
+    local clockNow = os_clock()
+    if (clockNow - _lastJamAnnounce) >= JAM_ANNOUNCE_SEC then
+        _lastJamAnnounce = clockNow
+        if charID and MidiMod.Network and MidiMod.Network.broadcastJamAnnounce then
+            -- A mirror has no score of its own, so no progress to report
+            pcall(MidiMod.Network.broadcastJamAnnounce, charID, "", Player.jamLeaderID, 0, 0)
+        end
+    end
+end
+
 -- Think hook: note playback + aim backup
 Hook.Add("think", "MidiMod.Player.Think", function()
+    -- Mirroring another performer: separate lightweight path
+    if Player.jamLeaderID and not Player.playing then
+        mirrorThink()
+        return
+    end
+
     if not Player.sourceCharacter or not Player.playing then
         return
     end

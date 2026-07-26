@@ -10,6 +10,7 @@ local NET_STOP       = "MidiMod.Stop"
 local NET_NOTES      = "MidiMod.Notes"
 local NET_BUFF_START = "MidiMod.BuffStart"
 local NET_BUFF_STOP  = "MidiMod.BuffStop"
+local NET_JAM        = "MidiMod.JamAnnounce"
 
 local pcall          = pcall
 local tonumber       = tonumber
@@ -117,6 +118,41 @@ function Network.initServer()
         if not charID then return end
         Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
+
+    -- Jam announce: relay "who performs / who mirrors whom" to other clients.
+    -- mirrorOf is a claim about somebody else's charID and stays as sent - the
+    -- worst it can do is make a mirror follow the wrong leader, and only the
+    -- announcing client's own instrument is affected.
+    Networking.Receive(NET_JAM, function(message, client)
+        message.ReadUInt16()
+        local fileName = message.ReadString()
+        local mirrorOf = message.ReadUInt16() -- 0 = performer, else leader charID
+        local posSec   = message.ReadUInt16()
+        local durSec   = message.ReadUInt16()
+
+        local charID = senderCharID(client)
+        if not charID then return end
+        if not fileName or #fileName > 128 then return end
+
+        -- "I mirror myself" would put the sender in everyone's jamMirrors as
+        -- its own leader, so playStreamedNotes would build two targets with
+        -- the same charID and play every note twice - and the second channel
+        -- overwrites the first's uid, so the first never gets released.
+        if mirrorOf == charID then mirrorOf = 0 end
+
+        local broadcast = Networking.Start(NET_JAM)
+        broadcast.WriteUInt16(charID)
+        broadcast.WriteString(fileName)
+        broadcast.WriteUInt16(mirrorOf)
+        broadcast.WriteUInt16(posSec)
+        broadcast.WriteUInt16(durSec)
+
+        for _, c in pairs(Client.ClientList) do
+            if c ~= client then
+                Networking.Send(broadcast, c.Connection)
+            end
+        end
+    end)
 end
 
 function Network.initClient()
@@ -146,6 +182,8 @@ end
 -- Queue notes into jitter buffer instead of playing immediately.
 -- Format: "delta:note,vel;delta:note,vel;..." (delta in ms from batch start)
 -- Backward compat: "note,vel" without delta prefix is treated as delta=0.
+-- Every note is queued once for the sender and once per character mirroring
+-- them (jam): same notes, but the mirror's instrument and position.
 function Network.playStreamedNotes(charID, notesStr, instrId)
     if not MidiMod.SoundEngine then return end
 
@@ -169,6 +207,52 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
     end
 
+    -- Sender first, then everyone mirroring them
+    local targets = { { id = charID, inst = instrId, pos = worldPos } }
+
+    -- If we are mirroring this sender, add ourselves. The server relays jam
+    -- announces to everyone *except* the sender, so our own announce never
+    -- comes back to us: we are absent from our own jamMirrors map and the
+    -- loop below will not find us. Same asymmetry the leader works around by
+    -- duplicating onto mirrors locally in player.onThink - without this the
+    -- mirror hears the leader's instrument but not its own.
+    if ourID and MidiMod.Player and MidiMod.Player.jamLeaderID == charID then
+        local ourChar = Character.Controlled
+        if ourChar then
+            local ourInst, ourItem = MidiMod.GetHeldInstrument(ourChar)
+            if ourInst then
+                local ourPos = nil
+                pcall(function() ourPos = ourItem.WorldPosition end)
+                targets[#targets + 1] = { id = ourID, inst = ourInst, pos = ourPos }
+            end
+        end
+    end
+
+    if MidiMod.Player and MidiMod.Player.getMirrorsOf then
+        local mirrors = MidiMod.Player.getMirrorsOf(charID)
+        if mirrors then
+            for i = 1, #mirrors do
+                local mID = mirrors[i]
+                -- Skip ourselves (already added above) and the sender (a
+                -- "mirrors itself" claim). Either would be a second target
+                -- with a charID we already have, so every note would play
+                -- twice and only the newer channel would ever be released.
+                if mID ~= ourID and mID ~= charID then
+                    local mChar = nil
+                    pcall(function() mChar = Entity.FindEntityByID(mID) end)
+                    if mChar then
+                        local mInst, mItem = MidiMod.GetHeldInstrument(mChar)
+                        if mInst then
+                            local mPos = nil
+                            pcall(function() mPos = mItem.WorldPosition end)
+                            targets[#targets + 1] = { id = mID, inst = mInst, pos = mPos }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     local receiveTime = getNetTimeMs()
 
     for part in string_gmatch(notesStr, "([^;]+)") do
@@ -182,15 +266,18 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
 
         if note and vel then
-            _noteBufLen = _noteBufLen + 1
-            _noteBuffer[_noteBufLen] = {
-                playAt   = receiveTime + JITTER_MS + delta,
-                note     = tonumber(note),
-                vel      = tonumber(vel),
-                charID   = charID,
-                instrId  = instrId,
-                worldPos = worldPos,
-            }
+            for t = 1, #targets do
+                local target = targets[t]
+                _noteBufLen = _noteBufLen + 1
+                _noteBuffer[_noteBufLen] = {
+                    playAt   = receiveTime + JITTER_MS + delta,
+                    note     = tonumber(note),
+                    vel      = tonumber(vel),
+                    charID   = target.id,
+                    instrId  = target.inst,
+                    worldPos = target.pos,
+                }
+            end
         end
     end
 
@@ -338,6 +425,50 @@ function Network.requestPlay(fileName, tempoMult)
             MidiMod.Log("Failed to parse MIDI: " .. tostring(err))
         end
     )
+end
+
+-- Join another performer: mirror their note stream on our instrument.
+-- No file needed on our side - the leader's streamed notes (NET_NOTES) are
+-- the sheet music, every client duplicates them onto our instrument.
+-- Returns true if mirroring started, false plus a reason otherwise.
+function Network.requestJoin(leaderCharID)
+    if Game.IsSingleplayer then return false, "singleplayer" end
+
+    local character = Character.Controlled
+    if not character or not MidiMod.IsHoldingInstrument(character) then
+        MidiMod.Log("Not holding instrument!")
+        return false, "noinstrument"
+    end
+
+    if not MidiMod.Player then
+        MidiMod.Log("Player module not loaded!")
+        return false, "nomodule"
+    end
+
+    local entry = MidiMod.Player.activePerformers[leaderCharID]
+    if not entry then
+        MidiMod.Log("Performer is no longer playing")
+        return false, "gone"
+    end
+
+    -- Stop current playback / mirroring first
+    Network.requestStop()
+
+    MidiMod.Player.jamLeaderID = leaderCharID
+    MidiMod.Log("Mirroring char " .. tostring(leaderCharID) .. " (" .. tostring(entry.fileName) .. ")")
+
+    -- Announce immediately so other clients start duplicating the leader's
+    -- stream onto us without waiting for the periodic announce.
+    local ourID = nil
+    pcall(function() ourID = character.ID end)
+    if ourID then
+        Network.broadcastJamAnnounce(ourID, "", leaderCharID, 0, 0)
+    end
+
+    if MidiMod.BuffsEnabled then
+        Network.notifyBuffStart(character)
+    end
+    return true
 end
 
 function Network.requestStop(charID)

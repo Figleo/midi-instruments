@@ -46,6 +46,12 @@ local fileListBox            = nil
 local searchBox              = nil
 local progressSlider         = nil
 local progressTimeLabel      = nil
+local nowPlayingLabel        = nil
+
+-- Jam section: title + one button per performer we can join
+local jamTitleLabel          = nil
+local jamListBox             = nil
+local lastPerformerKey       = "" -- signature of the current button set
 
 -- Seek drag state: apply the seek on mouse release, not on every drag tick
 local pendingSeekScroll      = nil
@@ -107,6 +113,91 @@ local function rebuildFileList(searchText)
     end
 end
 
+-- === Jam section (play together) ===
+
+-- Character name for a performer button, with a fallback
+local function getCharName(charID)
+    local name = nil
+    pcall(function()
+        local ent = Entity.FindEntityByID(charID)
+        if ent then name = tostring(ent.Name) end
+    end)
+    return name or ("#" .. tostring(charID))
+end
+
+-- Rebuild the jam buttons. Called from the think hook only when the set of
+-- performers changed, and hidden entirely when there is nobody to join.
+local function rebuildJamList(performers)
+    if not jamListBox then return end
+
+    pcall(function() jamListBox.ClearChildren() end)
+
+    for charID, entry in pairs(performers) do
+        local label = getCharName(charID) .. " - " .. tostring(entry.fileName)
+
+        local btn = GUI.Button(
+            GUI.RectTransform(Vector2(1, 0), jamListBox.Content.RectTransform, GUI.Anchor.TopCenter, nil,
+                Point(0, 28)),
+            " " .. label,
+            GUI.Alignment.CenterLeft,
+            "ListBoxElement"
+        )
+        btn.CanBeFocused = true
+        btn.HoverColor = Color(255, 255, 255, 255)
+
+        pcall(function()
+            local tb = btn.GetChild(0)
+            if tb then
+                tb.TextColor      = Color(255, 220, 120)
+                tb.HoverTextColor = Color(255, 255, 255)
+            end
+        end)
+
+        local capturedID = charID
+        btn.OnClicked = function()
+            if MidiMod.Network and MidiMod.Network.requestJoin then
+                MidiMod.Network.requestJoin(capturedID)
+            end
+            return true
+        end
+    end
+end
+
+-- Show/hide the jam section and rebuild its buttons when the performer set
+-- changes. Cheap signature comparison so this can run every frame.
+local function updateJamSection()
+    if not jamListBox or not MidiMod.Player then return end
+
+    local performers = {}
+    -- Section is only useful in multiplayer, while not playing or mirroring
+    if not Game.IsSingleplayer and not MidiMod.Player.playing
+        and not MidiMod.Player.jamLeaderID then
+        performers = MidiMod.Player.getPerformers()
+    end
+
+    -- Signature: sorted charID:file pairs, so renames of the melody count too
+    local parts = {}
+    for charID, entry in pairs(performers) do
+        parts[#parts + 1] = charID .. ":" .. tostring(entry.fileName)
+    end
+    table.sort(parts)
+    local key = table.concat(parts, ";")
+
+    if key == lastPerformerKey then return end
+    lastPerformerKey = key
+
+    local visible = key ~= ""
+    pcall(function()
+        jamTitleLabel.Visible = visible
+        jamListBox.Visible    = visible
+    end)
+    if visible then
+        rebuildJamList(performers)
+    else
+        pcall(function() jamListBox.ClearChildren() end)
+    end
+end
+
 -- === Panel lifecycle ===
 local function destroyPanel()
     if frame then
@@ -120,6 +211,10 @@ local function destroyPanel()
     searchBox         = nil
     progressSlider    = nil
     progressTimeLabel = nil
+    nowPlayingLabel   = nil
+    jamTitleLabel     = nil
+    jamListBox        = nil
+    lastPerformerKey  = ""
     pendingSeekScroll = nil
     MGUI.isOpen       = false
 end
@@ -303,6 +398,23 @@ local function createPanel()
         return true
     end
 
+    -- === Play together ===
+    -- Hidden until someone else is performing; filled by updateJamSection.
+    jamTitleLabel               = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
+        L("jamtitle", "Play Together:"),
+        nil, nil, GUI.Alignment.CenterLeft
+    )
+    jamTitleLabel.TextColor     = Color(255, 220, 120)
+    jamTitleLabel.Padding       = Vector4(4, 0, 0, 0)
+    jamTitleLabel.Visible       = false
+
+    jamListBox                  = GUI.ListBox(
+        GUI.RectTransform(Vector2(1, 0.16), contentList.Content.RectTransform)
+    )
+    jamListBox.Visible          = false
+    lastPerformerKey            = ""
+
     -- === Buff toggle ===
     local buffRow               = GUI.Frame(
         GUI.RectTransform(Vector2(1, 0.08), contentList.Content.RectTransform),
@@ -397,6 +509,11 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
             lastSearch = currentText
             rebuildFileList(lastSearch)
         end
+    end
+
+    -- === Play together section ===
+    if MGUI.isOpen then
+        pcall(updateJamSection)
     end
 
     -- === Update status label only ===

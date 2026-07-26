@@ -15,4 +15,6 @@
   <midiplayer.loading>Загрузка...  |  F5 скрыть</midiplayer.loading>
   <midiplayer.playing>Играет...  |  F5 скрыть</midiplayer.playing>
   <midiplayer.volumehint>* Громкость: Esc -&gt; Настройки -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
+  <midiplayer.jamtitle>Играть вместе:</midiplayer.jamtitle>
+  <midiplayer.jamming>Играем вместе...  |  Стоп чтобы выйти</midiplayer.jamming>
 </infotexts>

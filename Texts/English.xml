@@ -15,4 +15,6 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midiplayer.loading>Loading...  |  F5 to hide</midiplayer.loading>
   <midiplayer.playing>Playing...  |  F5 to hide</midiplayer.playing>
   <midiplayer.volumehint>* Volume: Esc -&gt; Settings -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
+  <midiplayer.jamtitle>Play Together:</midiplayer.jamtitle>
+  <midiplayer.jamming>Playing together...  |  Stop to leave</midiplayer.jamming>
 </infotexts>
