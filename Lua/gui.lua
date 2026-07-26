@@ -65,6 +65,19 @@ local function formatTime(ms)
     return string.format("%d:%02d", math.floor(totalSec / 60), totalSec % 60)
 end
 
+-- Set the "now playing" line. An empty TextBlock still takes up its slot in
+-- the content list and reads as a blank gap in the panel, so text and
+-- visibility are set together here rather than at each call site - that way
+-- the two cannot drift apart.
+local function setNowPlaying(text)
+    if not nowPlayingLabel then return end
+    text = text or ""
+    pcall(function()
+        nowPlayingLabel.Text    = text
+        nowPlayingLabel.Visible = text ~= ""
+    end)
+end
+
 -- === File list builder ===
 local function rebuildFileList(searchText)
     if not fileListBox then return end
@@ -447,13 +460,16 @@ local function createPanel()
         return true
     end
     -- === Now playing ===
-    local nowPlayingLabel     = GUI.TextBlock(
+    -- Starts hidden: there is nothing playing yet, and an empty block would
+    -- just be a gap. setNowPlaying shows it again as soon as there is a name.
+    nowPlayingLabel           = GUI.TextBlock(
         GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform),
         "",
         nil, nil, GUI.Alignment.Center
     )
     nowPlayingLabel.TextColor = Color(100, 255, 140)
     nowPlayingLabel.Wrap      = true
+    nowPlayingLabel.Visible   = false
 
     -- === Status ===
     statusLabel               = GUI.TextBlock(
@@ -472,7 +488,6 @@ local function createPanel()
     volHint.TextColor         = Color(100, 100, 100)
     volHint.Wrap              = true
 
-    MGUI.nowPlayingLabel      = nowPlayingLabel
     MGUI.isOpen               = true
 end
 
@@ -522,18 +537,23 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
             if MidiMod.MidiParser and MidiMod.MidiParser._parseState then
                 statusLabel.Text      = L("loading", "Loading...  |  F5 to hide")
                 statusLabel.TextColor = Color(255, 200, 50)
+                -- Nothing sounding yet, and the name of the previous file
+                -- would be misleading while a new one is being parsed
+                setNowPlaying(nil)
             elseif MidiMod.Player.playing then
                 statusLabel.Text      = L("playing", "Playing...  |  F5 to hide")
                 statusLabel.TextColor = Color(100, 255, 140)
-                if MGUI.nowPlayingLabel and MidiMod.Player.currentFile then
-                    MGUI.nowPlayingLabel.Text = getFileName(MidiMod.Player.currentFile)
-                end
+                setNowPlaying(MidiMod.Player.currentFile
+                    and getFileName(MidiMod.Player.currentFile))
+            elseif MidiMod.Player.jamLeaderID then
+                statusLabel.Text      = L("jamming", "Playing together...  |  Stop to leave")
+                statusLabel.TextColor = Color(255, 220, 120)
+                local leader = MidiMod.Player.activePerformers[MidiMod.Player.jamLeaderID]
+                setNowPlaying(leader and leader.fileName)
             else
                 statusLabel.Text      = L("ready", "Ready  |  F5 to toggle")
                 statusLabel.TextColor = Color(140, 140, 140)
-                if MGUI.nowPlayingLabel then
-                    MGUI.nowPlayingLabel.Text = ""
-                end
+                setNowPlaying(nil)
             end
         end)
     end
