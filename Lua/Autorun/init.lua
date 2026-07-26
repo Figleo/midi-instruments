@@ -156,6 +156,9 @@ if CLIENT then
             lastKnownVolume = vol
             MidiMod.CurrentVolume = math.max(0.0, math.min(1.0, vol))
             MidiMod.DebugLog("Volume changed to: " .. MidiMod.CurrentVolume)
+            if MidiMod.SoundEngine and MidiMod.SoundEngine.refreshVolume then
+                pcall(MidiMod.SoundEngine.refreshVolume)
+            end
         end
     end)
 end
