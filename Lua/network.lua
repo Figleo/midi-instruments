@@ -27,6 +27,15 @@ local JITTER_MS      = 60
 local _noteBuffer    = {}
 local _noteBufLen    = 0
 
+-- Safety cap on the jitter buffer. Entries are queued per TARGET, not per
+-- note: a leader with three mirrors turns one packet into four times the
+-- entries, so a dense passage in a full band legitimately queues several
+-- hundred. The old cap of 256 was below that, so a normal jam tripped the
+-- flush routinely - and the flush drops queued note-offs, leaving notes
+-- ringing for everyone. Sized well clear of legitimate traffic: tripping this
+-- now means a sender is flooding, not that the band got big.
+local NOTE_BUF_MAX   = 1024
+
 local function getNetTimeMs()
     return os_clock() * 1000
 end
@@ -281,8 +290,11 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
     end
 
-    -- Safety cap: if buffer grows too large, something is wrong - flush it
-    if _noteBufLen > 256 then
+    -- Safety cap: if the buffer grows this far something is wrong - flush it.
+    -- Logged rather than silent, because the flush drops pending note-offs and
+    -- whatever is sounding right then will ring out.
+    if _noteBufLen > NOTE_BUF_MAX then
+        MidiMod.Log("Jitter buffer overflow (" .. _noteBufLen .. " entries) - flushing")
         Network.clearBuffer()
     end
 end
