@@ -17,7 +17,7 @@ local coroutine    = coroutine
 local os_clock     = os.clock
 local math_max     = math.max
 
--- ─── Binary helpers ───
+-- === Binary helpers ===
 
 local function readBytes(data, pos, count)
     return ssub(data, pos, pos + count - 1), pos + count
@@ -47,7 +47,7 @@ local function readVarLen(data, pos)
     return value, pos
 end
 
--- ─── Header / Track ───
+-- === Header / Track ===
 
 local function parseHeader(data, pos)
     local chunk
@@ -188,7 +188,7 @@ local function parseTrack(data, pos, yieldFn)
     return events, math_max(pos, trackEnd)
 end
 
--- ─── Merge & Score ───
+-- === Merge & Score ===
 
 -- Event ordering: tick ascending; at same tick: tempo > noteOff > noteOn.
 -- Tie-breaker on note number keeps the comparator strictly weak.
@@ -295,17 +295,75 @@ local function buildScore(allEvents, ticksPerQuarter, yieldFn)
     return score
 end
 
--- ─── Cache ───
+-- === Cache ===
+
+-- Parsed scores, keyed by file path. Capped because one score is a table per
+-- note event, which is a few thousand entries for a busy file.
+local CACHE_MAX = 12
 
 MidiParser._cache = {}
+MidiParser._cacheOrder = {} -- insertion order, oldest first
 
 function MidiParser.clearCache()
     for k in pairs(MidiParser._cache) do
         MidiParser._cache[k] = nil
     end
+    for i = #MidiParser._cacheOrder, 1, -1 do
+        MidiParser._cacheOrder[i] = nil
+    end
 end
 
--- ─── Async parse ───
+local function cachePut(filePath, entry)
+    if MidiParser._cache[filePath] == nil then
+        tinsert(MidiParser._cacheOrder, filePath)
+        -- Drops the oldest entry, not the least recently used. Fine unless
+        -- someone rotates through more than CACHE_MAX files in one session.
+        while #MidiParser._cacheOrder > CACHE_MAX do
+            local oldest = MidiParser._cacheOrder[1]
+            table.remove(MidiParser._cacheOrder, 1)
+            MidiParser._cache[oldest] = nil
+        end
+    end
+    MidiParser._cache[filePath] = entry
+end
+
+-- Current size of a file on disk, or nil if it cannot be read.
+local function getFileSize(filePath)
+    local size = nil
+    pcall(function()
+        local f = io_open(filePath, "rb")
+        if f then
+            size = f:seek("end")
+            f:close()
+        end
+    end)
+    return size
+end
+
+-- Cache lookup that notices file replacement. The cache is keyed by path, but
+-- the user can overwrite a midi file with a new one under the same name, so a
+-- path match alone is not enough. Entries remember the file size they were
+-- parsed from; if the size on disk differs, the entry is stale and gets
+-- dropped. A replaced file with the exact same byte size still slips through -
+-- the Refresh button in the GUI does a full clearCache for that case.
+local function cacheGet(filePath)
+    local entry = MidiParser._cache[filePath]
+    if not entry then return nil end
+
+    if entry.fileSize ~= getFileSize(filePath) then
+        MidiParser._cache[filePath] = nil
+        for i = #MidiParser._cacheOrder, 1, -1 do
+            if MidiParser._cacheOrder[i] == filePath then
+                table.remove(MidiParser._cacheOrder, i)
+                break
+            end
+        end
+        return nil
+    end
+    return entry
+end
+
+-- === Async parse ===
 
 MidiParser._parseState = nil
 
@@ -319,10 +377,12 @@ local FRAME_BUDGET_SEC = 0.004
 function MidiParser.parseAsync(filePath, onDone, onError)
     MidiParser._parseState = nil
 
-    -- Check cache first — instant callback, no coroutine needed
-    if MidiParser._cache[filePath] then
+    -- Check cache first - instant callback, no coroutine needed.
+    -- cacheGet drops the entry itself if the file on disk changed.
+    local cached = cacheGet(filePath)
+    if cached then
         MidiMod.Log("Async cache hit: " .. filePath)
-        if onDone then pcall(onDone, MidiParser._cache[filePath].score) end
+        if onDone then pcall(onDone, cached.score) end
         return
     end
 
@@ -330,7 +390,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
     local deadline = 0
 
     -- Each phase gets its own yielder to avoid double-throttling.
-    -- os.clock() is a C# interop call — interval controls how often we check.
+    -- os.clock() is a C# interop call - interval controls how often we check.
     local function makeYielder(interval)
         local counter = 0
         return function()
@@ -376,7 +436,9 @@ function MidiParser.parseAsync(filePath, onDone, onError)
         local score = buildScore(allEvents, header.ticksPerQuarter, yieldScore)
         MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
 
-        MidiParser._cache[filePath] = { score = score, header = header }
+        -- #data is the file size; cacheGet compares it against the size on
+        -- disk to detect a replaced file.
+        cachePut(filePath, { score = score, header = header, fileSize = #data })
         return score
     end)
 
@@ -424,7 +486,7 @@ if CLIENT then
     end)
 end
 
--- ─── File discovery ───
+-- === File discovery ===
 
 local MIDI_STORAGE_WORKSHOP_ID = "3695216167"
 
@@ -466,7 +528,7 @@ function MidiParser.listMidiFiles()
         scanFolder(storageMidiPath, files)
     end
 
-    -- Local folder — controlled by MidiMod.Debug
+    -- Local folder - controlled by MidiMod.Debug
     if MidiMod.Debug then
         local localDir = basePath .. "Midi"
         local count = scanFolder(localDir, files)
