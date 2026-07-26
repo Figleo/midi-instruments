@@ -346,17 +346,24 @@ function Network.requestStop(charID)
         pcall(MidiMod.MidiParser.cancelAsync)
     end
 
+    -- Resolve our charID BEFORE stopping - Player.stop() clears
+    -- sourceCharacter. sourceCharacter is the more reliable source here:
+    -- the usual caller is the death/incapacitated path in player.lua, and
+    -- Character.Controlled is often already nil by then.
+    if not charID and MidiMod.Player then
+        pcall(function() charID = MidiMod.Player.sourceCharacter.ID end)
+    end
     if not charID then
-        local ch = Character.Controlled
-        if ch then charID = ch.ID else return end
+        pcall(function() charID = Character.Controlled.ID end)
     end
 
-    -- Stop local playback
+    -- Stop local playback unconditionally. Bailing out early on a missing
+    -- charID used to leave Player.playing true with notes still sounding.
     if MidiMod.Player then
         MidiMod.Player.stop()
     end
 
-    if Game.IsSingleplayer then return end
+    if Game.IsSingleplayer or not charID then return end
 
     -- Tell server (and other clients) we stopped
     local msg = Networking.Start(NET_STOP)
