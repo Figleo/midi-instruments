@@ -691,7 +691,21 @@ if SERVER then
             local isDead = true
             local ok = pcall(function() isDead = character.IsDead end)
 
-            if character and ok and not isDead then
+            -- A player who disconnects mid-song leaves their body in the round,
+            -- alive and still holding the instrument - so neither the death
+            -- check nor the item check below notices they are gone, and their
+            -- talent buffs would keep charging for the rest of the round.
+            local connected = false
+            pcall(function()
+                for _, c in pairs(Client.ClientList) do
+                    if c.Character and c.Character.ID == charID then
+                        connected = true
+                        break
+                    end
+                end
+            end)
+
+            if character and ok and not isDead and connected then
                 local _, item = MidiMod.GetHeldInstrument(character)
                 if item then
                     pcall(function()
@@ -699,6 +713,9 @@ if SERVER then
                             AbilityEffectType.OnUseRangedWeapon,
                             AbilityRangedWeapon.__new(item))
                     end)
+                else
+                    -- Instrument holstered or dropped without a Stop reaching us
+                    playing[charID] = nil
                 end
             else
                 playing[charID] = nil
