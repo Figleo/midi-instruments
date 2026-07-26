@@ -520,8 +520,20 @@ pcall(function()
         "Barotrauma.Character",
         "ControlLocalPlayer",
         function(instance, ptable)
-            if instance ~= Player.sourceCharacter then return end
-            if not Player.playing then return end
+            -- Performing: force the pose on our own performing character.
+            -- Mirroring: we hold no score, so playing is false and
+            -- sourceCharacter is nil - but the pose still has to be forced,
+            -- or other players see us standing with the instrument lowered
+            -- while notes come out of it. The think hook calls forceAim too,
+            -- but only this patch runs at the point in the frame where the
+            -- forced input survives to be networked.
+            local target = nil
+            if Player.playing then
+                target = Player.sourceCharacter
+            elseif Player.jamLeaderID then
+                target = Character.Controlled
+            end
+            if not target or instance ~= target then return end
             forceAim(instance)
         end,
         Hook.HookMethodType.After
