@@ -15,16 +15,11 @@ local pcall          = pcall
 local tonumber       = tonumber
 local tostring       = tostring
 local pairs          = pairs
-local ipairs         = ipairs
-local tconcat        = table.concat
-local tinsert        = table.insert
 local string_gmatch  = string.gmatch
 local string_match   = string.match
-local math_max       = math.max
 local os_clock       = os.clock
-local math_floor     = math.floor
 
--- ─── Jitter buffer ───
+-- === Jitter buffer ===
 -- Delays incoming notes slightly to smooth out network jitter.
 -- Adds JITTER_MS of latency but produces consistent rhythm.
 local JITTER_MS      = 60
@@ -35,7 +30,7 @@ local function getNetTimeMs()
     return os_clock() * 1000
 end
 
--- ─── Init ───
+-- === Init ===
 
 function Network.init()
     if SERVER then Network.initServer() end
@@ -118,7 +113,7 @@ function Network.initClient()
     end)
 end
 
--- ─── Helpers ───
+-- === Helpers ===
 
 -- Queue notes into jitter buffer instead of playing immediately.
 -- Format: "delta:note,vel;delta:note,vel;..." (delta in ms from batch start)
@@ -137,10 +132,6 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         else
             pcall(function() worldPos = character.WorldPosition end)
         end
-    end
-
-    if MidiMod.Player and MidiMod.Player.streamingCharacters then
-        MidiMod.Player.streamingCharacters[charID] = os_clock()
     end
 
     local receiveTime = getNetTimeMs()
@@ -168,7 +159,7 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
         end
     end
 
-    -- Safety cap: if buffer grows too large, something is wrong — flush it
+    -- Safety cap: if buffer grows too large, something is wrong - flush it
     if _noteBufLen > 256 then
         Network.clearBuffer()
     end
@@ -268,7 +259,7 @@ function Network.notifyBuffStop(character)
     Networking.Send(msg)
 end
 
--- ─── High-level requests ───
+-- === High-level requests ===
 
 function Network.requestPlay(fileName, tempoMult)
     tempoMult = tempoMult or 1.0
