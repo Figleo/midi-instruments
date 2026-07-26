@@ -502,6 +502,16 @@ function SoundEngine.releaseNote(midiNote, charID)
         if info.note == midiNote and (not charID or info.charID == charID) then
             if not targetUID or info.uid == targetUID then
                 pcall(function() info.channel.FadeOutAndDispose(NOTE_RELEASE_FADE) end)
+                -- Clear tracking for the channel we actually removed, keyed by
+                -- ITS owner. The cleanup below keys off the charID argument,
+                -- which does nothing when that argument is nil - the uid then
+                -- survives its channel, and the owner's next release looks for
+                -- a channel that is already gone, finds nothing, and leaves the
+                -- note ringing to the end of the sample.
+                local tracked = info.charID and SoundEngine.activeNoteUIDs[info.charID]
+                if tracked and tracked[info.note] == info.uid then
+                    tracked[info.note] = nil
+                end
                 tremove(SoundEngine.activeChannels, i)
                 break -- only release one instance (oldest or exact match)
             end
