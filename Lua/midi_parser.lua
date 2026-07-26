@@ -282,7 +282,9 @@ local function buildScore(allEvents, ticksPerQuarter, yieldFn)
     end
 
     -- Auto-release any still-active notes after 200 ms
+    local autoReleased = false
     for key, startTime in pairs(activeNotes) do
+        autoReleased = true
         scoreN = scoreN + 1
         score[scoreN] = {
             timeMs  = startTime + 200,
@@ -290,6 +292,31 @@ local function buildScore(allEvents, ticksPerQuarter, yieldFn)
             note    = key % 128,
             channel = mfloor(key / 128),
         }
+    end
+
+    -- The auto-releases above are appended at the end but their timeMs is the
+    -- note's start + 200ms, which is usually far earlier than the last real
+    -- event. That leaves the array unsorted, and two things downstream require
+    -- ascending timeMs: getDurationMs() reads score[#score].timeMs, and seek()
+    -- binary-searches the array. Only sort when we actually appended something.
+    if autoReleased then
+        -- Must be a STABLE sort by time, and table.sort is not stable. The
+        -- order the main loop emitted events in carries meaning that
+        -- (timeMs, type) alone cannot reconstruct:
+        --   retrigger          -> [off, on] at the same instant
+        --   zero-length note   -> [on, off] at the same instant
+        -- Both are correct and a type-based tie-break inverts one of them.
+        -- Getting it backwards on the second case releases a note before its
+        -- channel exists and then starts one nothing will ever release - it
+        -- rings until the sample runs out. So tie-break on original position:
+        -- nothing that was already in order moves, and the auto-releases
+        -- appended above drop into their place by time.
+        local order = {}
+        for i = 1, scoreN do order[score[i]] = i end
+        table.sort(score, function(a, b)
+            if a.timeMs ~= b.timeMs then return a.timeMs < b.timeMs end
+            return order[a] < order[b]
+        end)
     end
 
     return score
