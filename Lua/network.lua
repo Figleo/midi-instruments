@@ -359,11 +359,21 @@ end
 
 -- Buff notifications (sent once on play start/stop, not spammed)
 
+-- On a listen server we ARE the server, and a message we send never comes
+-- back to our own Networking.Receive. So the host has to call the buff hooks
+-- directly - otherwise the host is the one player who never gets talent buffs
+-- from playing, and never stops charging them either.
+
 function Network.notifyBuffStart(character)
     if Game.IsSingleplayer or not character then return end
     local charID = nil
     pcall(function() charID = character.ID end)
     if not charID then return end
+
+    if SERVER then
+        Hook.Call("MidiMod.Server.BuffStart", charID, character)
+        return
+    end
 
     local msg = Networking.Start(NET_BUFF_START)
     msg.WriteUInt16(charID)
@@ -375,6 +385,11 @@ function Network.notifyBuffStop(character)
     local charID = nil
     pcall(function() charID = character.ID end)
     if not charID then return end
+
+    if SERVER then
+        Hook.Call("MidiMod.Server.BuffStop", charID)
+        return
+    end
 
     local msg = Networking.Start(NET_BUFF_STOP)
     msg.WriteUInt16(charID)
@@ -501,6 +516,10 @@ function Network.requestStop(charID)
     msg.WriteUInt16(charID)
 
     if SERVER then
+        -- Our own send skips the server's Receive handler, which is where the
+        -- buff system normally learns about a stop. On a listen server that
+        -- would leave the host charging buffs forever after it stopped.
+        Hook.Call("MidiMod.Server.BuffStop", charID)
         for _, c in pairs(Client.ClientList) do
             Networking.Send(msg, c.Connection)
         end
