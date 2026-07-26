@@ -413,9 +413,15 @@ function SoundEngine.playNote(midiNote, velocity, worldPos, instrument, charID)
     if not SoundEngine.initialized then SoundEngine.init() end
     instrument = instrument or "accordion"
 
-    -- Deduplicate: if same note already queued, just keep highest velocity
+    -- Deduplicate: if the same character already has this note queued, just
+    -- keep the highest velocity. charID is part of the key: without it a
+    -- mirror's note merges into the leader's queued entry and is never heard,
+    -- because player.onThink queues the same note for the leader and for each
+    -- mirror in the same frame. Anything past MAX_NEW_PER_FRAME in a dense
+    -- passage would come out of the leader's position only.
     for _, queued in ipairs(SoundEngine.noteQueue) do
-        if queued.midiNote == midiNote and queued.instrument == instrument then
+        if queued.midiNote == midiNote and queued.instrument == instrument
+            and queued.charID == charID then
             queued.velocity = math_max(queued.velocity, velocity)
             return nil
         end
