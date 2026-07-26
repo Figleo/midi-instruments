@@ -106,10 +106,19 @@ local function parseTrack(data, pos, yieldFn)
         absTick = absTick + delta
 
         local statusByte = sbyte(data, pos)
+        if not statusByte then break end
 
         if statusByte >= 128 then
-            runStat = statusByte
+            -- Meta (0xFF) and sysex (0xF0/0xF7) cancel running status; channel
+            -- messages set it. Keeping 0xFF here would make the next running-
+            -- status event re-read a data byte as a meta type and derail the
+            -- rest of the track.
+            runStat = statusByte < 0xF0 and statusByte or 0
             pos = pos + 1
+        elseif runStat == 0 then
+            -- Data byte with no channel status in effect: the file is corrupt
+            -- past this point, stop rather than parse noise.
+            break
         else
             statusByte = runStat
         end
