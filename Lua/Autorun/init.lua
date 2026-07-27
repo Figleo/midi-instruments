@@ -36,12 +36,38 @@ MidiMod.CurrentVolume = 0.75
 -- Client-side toggle: allow this player to receive talent buffs while playing
 MidiMod.BuffsEnabled = true
 
+-- Which sound bank the electric guitar uses; switched from the GUI side panel.
+MidiMod.GuitarMode = "guitarelectric"
+
+-- Which sound bank the acoustic guitar uses; switched from the GUI side panel.
+MidiMod.AcousticGuitarMode = "guitar"
+
 MidiMod.Instruments = {
     ["accordion"] = true,
     ["guitar"] = true,
     ["guitarelectric"] = true,
-    ["harmonica"] = true
+    ["harmonica"] = true,
+    -- Alt sound bank for guitarelectric. Listed so the
+    -- server relay accepts it as a valid instrument id on the wire.
+    ["guitarelectric_lead"] = true,
+    ["guitarelectric_crunch"] = true,
+    ["guitarelectric_bass"] = true,
+    -- Alt sound banks for acoustic guitar.
+    ["guitar_acoustic"] = true,
+    ["guitar_acoustic_soft"] = true
 }
+
+-- Sound bank for our own playing: the electric guitar has two banks,
+-- picked by the mode switch in the GUI.
+function MidiMod.ActiveSoundBank(instId)
+    if instId == "guitarelectric" then
+        return MidiMod.GuitarMode or instId
+    end
+    if instId == "guitar" then
+        return MidiMod.AcousticGuitarMode or instId
+    end
+    return instId
+end
 
 -- Always prints (important messages only)
 function MidiMod.Log(msg)

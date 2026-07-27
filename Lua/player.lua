@@ -50,6 +50,11 @@ local os_clock             = os.clock
 local tinsert              = table.insert
 local tconcat              = table.concat
 
+-- Force the next jam announce out immediately (mode switch, seek).
+function Player.forceJamAnnounce()
+    _lastJamAnnounce = 0
+end
+
 -- === MIDI Loading ===
 
 function Player.loadScore(score, filePath)
@@ -383,7 +388,7 @@ local function onThink(currentInst, currentItem)
     if not Player.playing then return end
     if not Player.score then return end
 
-    currentInst = currentInst or "accordion"
+    currentInst = MidiMod.ActiveSoundBank(currentInst or "accordion")
 
     local worldPos = nil
     if currentItem then
@@ -421,7 +426,11 @@ local function onThink(currentInst, currentItem)
                 if mInst then
                     local mPos = nil
                     pcall(function() mPos = mItem.WorldPosition end)
-                    mirrorTargets[#mirrorTargets + 1] = { id = mirrors[i], inst = mInst, pos = mPos }
+                    -- The mirror's announced sound bank (mode switch) wins
+                    -- over the raw held-instrument id.
+                    local mEntry = Player.jamMirrors[mirrors[i]]
+                    mirrorTargets[#mirrorTargets + 1] =
+                        { id = mirrors[i], inst = (mEntry and mEntry.mode) or mInst, pos = mPos }
                 end
             end
         end
@@ -490,7 +499,8 @@ local function onThink(currentInst, currentItem)
                 -- Progress rides along so mirrors can draw a progress bar
                 pcall(MidiMod.Network.broadcastJamAnnounce, charID, fileName, 0,
                     math_floor(Player.getPositionMs() / 1000),
-                    math_floor(Player.getDurationMs() / 1000))
+                    math_floor(Player.getDurationMs() / 1000),
+                    currentInst)
             end
         end
     end
@@ -597,8 +607,11 @@ local function mirrorThink()
     if (clockNow - _lastJamAnnounce) >= JAM_ANNOUNCE_SEC then
         _lastJamAnnounce = clockNow
         if charID and MidiMod.Network and MidiMod.Network.broadcastJamAnnounce then
-            -- A mirror has no score of its own, so no progress to report
-            pcall(MidiMod.Network.broadcastJamAnnounce, charID, "", Player.jamLeaderID, 0, 0)
+            -- A mirror has no score of its own, so no progress to report.
+            -- mode carries our active sound bank, so other clients play our
+            -- mode switch instead of the default bank.
+            pcall(MidiMod.Network.broadcastJamAnnounce, charID, "",
+                Player.jamLeaderID, 0, 0, MidiMod.ActiveSoundBank(currentInst))
         end
     end
 end

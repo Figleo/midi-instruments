@@ -53,12 +53,22 @@ local jamTitleLabel          = nil
 local jamListBox             = nil
 local lastPerformerKey       = "" -- signature of the current button set
 
+-- Guitar mode side panel (electric guitar only): bank-switch buttons
+local modeFrame              = nil
+local modeButtons            = nil -- bank id -> button
+
+-- Acoustic guitar mode side panel (acoustic guitar only): bank-switch buttons
+local acousticModeFrame      = nil
+local acousticModeButtons    = nil -- bank id -> button
+
 -- Seek drag state: apply the seek on mouse release, not on every drag tick
 local pendingSeekScroll      = nil
 local lastSliderDragTime     = 0
 
 local lastSearch             = ""
-local savedPanelScreenOffset = nil
+local savedPanelScreenOffset        = nil
+local savedModeScreenOffset         = nil
+local savedAcousticModeScreenOffset = nil
 
 local function formatTime(ms)
     local totalSec = math.floor((ms or 0) / 1000 + 0.5)
@@ -211,8 +221,192 @@ local function updateJamSection()
     end
 end
 
+-- === Guitar mode side panel ===
+-- Two buttons that pick which sound bank the electric guitar plays.
+-- Child of the main panel, so it follows when the panel is dragged.
+
+local GUITAR_MODES = {
+    { bank = "guitarelectric",        tag = "modeclassic", fallback = "Classic" },
+    { bank = "guitarelectric_lead",   tag = "modelead",    fallback = "Lead" },
+    { bank = "guitarelectric_crunch", tag = "modecrunch",  fallback = "Crunch" },
+    { bank = "guitarelectric_bass",   tag = "modebass",    fallback = "Bass" },
+}
+
+local ACOUSTIC_GUITAR_MODES = {
+    { bank = "guitar",               tag = "modesteel",        fallback = "Steel" },
+    { bank = "guitar_acoustic",      tag = "modeacoustic",     fallback = "Acoustic" },
+    { bank = "guitar_acoustic_soft", tag = "modeacousticsoft", fallback = "Fingers Soft" },
+}
+
+local function updateModeButtons()
+    if not modeButtons then return end
+    for bank, btn in pairs(modeButtons) do
+        local selected = (MidiMod.GuitarMode == bank)
+        pcall(function()
+            local tb = btn.GetChild(0)
+            if tb then
+                tb.TextColor      = selected and Color(120, 255, 200) or Color(210, 210, 210)
+                tb.HoverTextColor = Color(255, 255, 255)
+            end
+        end)
+    end
+end
+
+local function updateAcousticModeButtons()
+    if not acousticModeButtons then return end
+    for bank, btn in pairs(acousticModeButtons) do
+        local selected = (MidiMod.AcousticGuitarMode == bank)
+        pcall(function()
+            local tb = btn.GetChild(0)
+            if tb then
+                tb.TextColor      = selected and Color(120, 255, 200) or Color(210, 210, 210)
+                tb.HoverTextColor = Color(255, 255, 255)
+            end
+        end)
+    end
+end
+
+local function createModePanel()
+    local modeW, modeH = 160, 190
+    modeFrame = GUI.Frame(
+        GUI.RectTransform(Point(modeW, modeH), frame.RectTransform, GUI.Anchor.CenterLeft),
+        "GUIFrameListBox"
+    )
+    modeFrame.RectTransform.AbsoluteOffset = Point(20, 0)
+    modeFrame.CanBeFocused = true
+    modeFrame.Visible = false -- shown by the think hook while holding the electric guitar
+
+    if savedModeScreenOffset then
+        pcall(function()
+            modeFrame.RectTransform.ScreenSpaceOffset = savedModeScreenOffset
+        end)
+    end
+
+    -- Drag handle
+    local modeDrag = GUI.DragHandle(
+        GUI.RectTransform(Vector2(1, 0.16), modeFrame.RectTransform, GUI.Anchor.TopCenter),
+        modeFrame.RectTransform,
+        nil
+    )
+    modeDrag.CanBeFocused = true
+    pcall(function()
+        modeDrag.DragArea = Rectangle(0, 0, GameMain.GraphicsWidth, GameMain.GraphicsHeight)
+    end)
+
+    GUI.Frame(
+        GUI.RectTransform(Vector2(0.08, 0.70), modeDrag.RectTransform, GUI.Anchor.CenterLeft),
+        "GUIDragIndicator"
+    ).CanBeFocused = false
+
+    local modeTitle = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 1), modeDrag.RectTransform),
+        L("guitarmode", "Guitar Mode"),
+        nil, nil, GUI.Alignment.Center
+    )
+    modeTitle.TextColor = Color(120, 200, 255)
+
+    modeButtons = {}
+    for i, mode in ipairs(GUITAR_MODES) do
+        local btn = GUI.Button(
+            GUI.RectTransform(Vector2(0.86, 0), modeFrame.RectTransform, GUI.Anchor.TopCenter, nil,
+                Point(0, 28)),
+            L(mode.tag, mode.fallback), GUI.Alignment.Center, "GUIButtonSmall"
+        )
+        btn.RectTransform.AbsoluteOffset = Point(0, 34 + (i - 1) * 36)
+
+        local capturedBank = mode.bank
+        btn.OnClicked = function()
+            MidiMod.GuitarMode = capturedBank
+            MidiMod.DebugLog("[GUI] Guitar mode -> " .. capturedBank)
+            updateModeButtons()
+            -- Mirroring: re-announce now so the band hears the new bank
+            -- without waiting for the periodic announce.
+            if MidiMod.Player and MidiMod.Player.forceJamAnnounce then
+                MidiMod.Player.forceJamAnnounce()
+            end
+            return true
+        end
+        modeButtons[mode.bank] = btn
+    end
+    updateModeButtons()
+end
+
+local function createAcousticModePanel()
+    local modeW = 160
+    local modeH = 34 + #ACOUSTIC_GUITAR_MODES * 36 + 10
+    acousticModeFrame = GUI.Frame(
+        GUI.RectTransform(Point(modeW, modeH), frame.RectTransform, GUI.Anchor.CenterLeft),
+        "GUIFrameListBox"
+    )
+    acousticModeFrame.RectTransform.AbsoluteOffset = Point(20, 0)
+    acousticModeFrame.CanBeFocused = true
+    acousticModeFrame.Visible = false -- shown by think hook while holding acoustic guitar
+
+    if savedAcousticModeScreenOffset then
+        pcall(function()
+            acousticModeFrame.RectTransform.ScreenSpaceOffset = savedAcousticModeScreenOffset
+        end)
+    end
+
+    local modeDrag = GUI.DragHandle(
+        GUI.RectTransform(Vector2(1, 0.16), acousticModeFrame.RectTransform, GUI.Anchor.TopCenter),
+        acousticModeFrame.RectTransform,
+        nil
+    )
+    modeDrag.CanBeFocused = true
+    pcall(function()
+        modeDrag.DragArea = Rectangle(0, 0, GameMain.GraphicsWidth, GameMain.GraphicsHeight)
+    end)
+
+    GUI.Frame(
+        GUI.RectTransform(Vector2(0.08, 0.70), modeDrag.RectTransform, GUI.Anchor.CenterLeft),
+        "GUIDragIndicator"
+    ).CanBeFocused = false
+
+    local modeTitle = GUI.TextBlock(
+        GUI.RectTransform(Vector2(1, 1), modeDrag.RectTransform),
+        L("guitaracousticmode", "Guitar Mode"),
+        nil, nil, GUI.Alignment.Center
+    )
+    modeTitle.TextColor = Color(120, 200, 255)
+
+    acousticModeButtons = {}
+    for i, mode in ipairs(ACOUSTIC_GUITAR_MODES) do
+        local btn = GUI.Button(
+            GUI.RectTransform(Vector2(0.86, 0), acousticModeFrame.RectTransform, GUI.Anchor.TopCenter, nil,
+                Point(0, 28)),
+            L(mode.tag, mode.fallback), GUI.Alignment.Center, "GUIButtonSmall"
+        )
+        btn.RectTransform.AbsoluteOffset = Point(0, 34 + (i - 1) * 36)
+
+        local capturedBank = mode.bank
+        btn.OnClicked = function()
+            MidiMod.AcousticGuitarMode = capturedBank
+            MidiMod.DebugLog("[GUI] Acoustic guitar mode -> " .. capturedBank)
+            updateAcousticModeButtons()
+            -- Mirroring: re-announce now so the band hears the new bank
+            -- without waiting for the periodic announce.
+            if MidiMod.Player and MidiMod.Player.forceJamAnnounce then
+                MidiMod.Player.forceJamAnnounce()
+            end
+            return true
+        end
+        acousticModeButtons[mode.bank] = btn
+    end
+    updateAcousticModeButtons()
+end
+
 -- === Panel lifecycle ===
 local function destroyPanel()
+    if panelFrame then
+        pcall(function() savedPanelScreenOffset = panelFrame.RectTransform.ScreenSpaceOffset end)
+    end
+    if modeFrame then
+        pcall(function() savedModeScreenOffset = modeFrame.RectTransform.ScreenSpaceOffset end)
+    end
+    if acousticModeFrame then
+        pcall(function() savedAcousticModeScreenOffset = acousticModeFrame.RectTransform.ScreenSpaceOffset end)
+    end
     if frame then
         pcall(function() frame.Visible = false end)
         pcall(function() frame.RectTransform.Parent = nil end)
@@ -227,17 +421,16 @@ local function destroyPanel()
     nowPlayingLabel   = nil
     jamTitleLabel     = nil
     jamListBox        = nil
-    lastPerformerKey  = ""
+    modeFrame           = nil
+    modeButtons         = nil
+    acousticModeFrame   = nil
+    acousticModeButtons = nil
+    lastPerformerKey    = ""
     pendingSeekScroll = nil
     MGUI.isOpen       = false
 end
 
 local function createPanel()
-    if panelFrame and panelFrame.RectTransform then
-        pcall(function()
-            savedPanelScreenOffset = panelFrame.RectTransform.ScreenSpaceOffset
-        end)
-    end
     destroyPanel()
     refreshFileList()
 
@@ -259,6 +452,9 @@ local function createPanel()
             panelFrame.RectTransform.ScreenSpaceOffset = savedPanelScreenOffset
         end)
     end
+
+    createModePanel()
+    createAcousticModePanel()
 
     -- === Title / drag handle ===
     local titleDrag = GUI.DragHandle(
@@ -531,6 +727,22 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
         pcall(updateJamSection)
     end
 
+    -- === Guitar mode side panel: only while holding the electric guitar ===
+    if MGUI.isOpen and modeFrame then
+        local heldInst = ch and MidiMod.GetHeldInstrument(ch)
+        pcall(function()
+            modeFrame.Visible = (heldInst == "guitarelectric")
+        end)
+    end
+
+    -- === Acoustic guitar mode side panel: only while holding the acoustic guitar ===
+    if MGUI.isOpen and acousticModeFrame then
+        local heldInst = ch and MidiMod.GetHeldInstrument(ch)
+        pcall(function()
+            acousticModeFrame.Visible = (heldInst == "guitar")
+        end)
+    end
+
     -- === Update status label only ===
     if MGUI.isOpen and statusLabel and MidiMod.Player then
         pcall(function()
@@ -548,7 +760,7 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
             elseif MidiMod.Player.jamLeaderID then
                 statusLabel.Text      = L("jamming", "Playing together...  |  Stop to leave")
                 statusLabel.TextColor = Color(255, 220, 120)
-                local leader = MidiMod.Player.activePerformers[MidiMod.Player.jamLeaderID]
+                local leader          = MidiMod.Player.activePerformers[MidiMod.Player.jamLeaderID]
                 setNowPlaying(leader and leader.fileName)
             else
                 statusLabel.Text      = L("ready", "Ready  |  F5 to toggle")

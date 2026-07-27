@@ -158,10 +158,12 @@ function Network.initServer()
         local mirrorOf = message.ReadUInt16() -- 0 = performer, else leader charID
         local posSec   = message.ReadUInt16()
         local durSec   = message.ReadUInt16()
+        local mode     = message.ReadString() -- sender's active sound bank
 
         local charID = senderCharID(client)
         if not charID then return end
         if not fileName or #fileName > 128 then return end
+        if not MidiMod.Instruments[mode] then mode = "" end
 
         -- "I mirror myself" would put the sender in everyone's jamMirrors as
         -- its own leader, so playStreamedNotes would build two targets with
@@ -175,6 +177,7 @@ function Network.initServer()
         broadcast.WriteUInt16(mirrorOf)
         broadcast.WriteUInt16(posSec)
         broadcast.WriteUInt16(durSec)
+        broadcast.WriteString(mode)
 
         for _, c in pairs(Client.ClientList) do
             if c ~= client then
@@ -229,6 +232,7 @@ function Network.initClient()
         local mirrorOf = message.ReadUInt16() -- 0 = performer, else leader charID
         local posSec   = message.ReadUInt16()
         local durSec   = message.ReadUInt16()
+        local mode     = message.ReadString() -- sender's active sound bank
 
         if MidiMod.Player then
             if mirrorOf == 0 then
@@ -244,6 +248,9 @@ function Network.initClient()
                 MidiMod.Player.jamMirrors[charID] = {
                     leaderID   = mirrorOf,
                     receivedAt = os_clock(),
+                    -- The mirror's chosen sound bank (mode switch); empty
+                    -- means "use whatever instrument they hold".
+                    mode       = mode ~= "" and mode or nil,
                 }
             end
         end
@@ -296,7 +303,8 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
             if ourInst then
                 local ourPos = nil
                 pcall(function() ourPos = ourItem.WorldPosition end)
-                targets[#targets + 1] = { id = ourID, inst = ourInst, pos = ourPos }
+                -- Our own instrument honors our local mode switch
+                targets[#targets + 1] = { id = ourID, inst = MidiMod.ActiveSoundBank(ourInst), pos = ourPos }
             end
         end
     end
@@ -318,7 +326,10 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
                         if mInst then
                             local mPos = nil
                             pcall(function() mPos = mItem.WorldPosition end)
-                            targets[#targets + 1] = { id = mID, inst = mInst, pos = mPos }
+                            -- The mirror's announced sound bank (mode switch)
+                            -- wins over the raw held-instrument id.
+                            local mEntry = MidiMod.Player.jamMirrors[mID]
+                            targets[#targets + 1] = { id = mID, inst = (mEntry and mEntry.mode) or mInst, pos = mPos }
                         end
                     end
                 end
@@ -456,6 +467,9 @@ end
 -- posSec/durSec carry the performer's progress so mirrors can show a progress
 -- bar; seconds in a UInt16 is plenty (18 hours) and mirrors interpolate
 -- locally between announces. Mirrors themselves send 0/0.
+-- mode is the sender's active sound bank (GUI mode switch): a performer's
+-- mode already rides in every NET_NOTES packet, but a mirror plays no notes
+-- of its own, so the announce is the only place its mode can travel.
 local function clampU16(v)
     v = tonumber(v) or 0
     if v < 0 then return 0 end
@@ -463,7 +477,7 @@ local function clampU16(v)
     return math.floor(v)
 end
 
-function Network.broadcastJamAnnounce(charID, fileName, mirrorOf, posSec, durSec)
+function Network.broadcastJamAnnounce(charID, fileName, mirrorOf, posSec, durSec, mode)
     if Game.IsSingleplayer then return end
 
     local msg = Networking.Start(NET_JAM)
@@ -472,6 +486,7 @@ function Network.broadcastJamAnnounce(charID, fileName, mirrorOf, posSec, durSec
     msg.WriteUInt16(mirrorOf or 0)
     msg.WriteUInt16(clampU16(posSec))
     msg.WriteUInt16(clampU16(durSec))
+    msg.WriteString(mode or "")
 
     if SERVER then
         for _, c in pairs(Client.ClientList) do
@@ -598,11 +613,14 @@ function Network.requestJoin(leaderCharID)
     MidiMod.Log("Mirroring char " .. tostring(leaderCharID) .. " (" .. tostring(entry.fileName) .. ")")
 
     -- Announce immediately so other clients start duplicating the leader's
-    -- stream onto us without waiting for the periodic announce.
+    -- stream onto us without waiting for the periodic announce. mode carries
+    -- our active sound bank so they play our mode switch from the first note.
     local ourID = nil
     pcall(function() ourID = character.ID end)
     if ourID then
-        Network.broadcastJamAnnounce(ourID, "", leaderCharID, 0, 0)
+        local ourInst = MidiMod.GetHeldInstrument(character)
+        Network.broadcastJamAnnounce(ourID, "", leaderCharID, 0, 0,
+            ourInst and MidiMod.ActiveSoundBank(ourInst) or nil)
     end
 
     if MidiMod.BuffsEnabled then

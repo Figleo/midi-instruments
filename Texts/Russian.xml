@@ -17,4 +17,13 @@
   <midiplayer.volumehint>* Громкость: Esc -&gt; Настройки -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
   <midiplayer.jamtitle>Играть вместе:</midiplayer.jamtitle>
   <midiplayer.jamming>Играем вместе...  |  Стоп чтобы выйти</midiplayer.jamming>
+  <midiplayer.guitarmode>Режим гитары</midiplayer.guitarmode>
+  <midiplayer.modeclassic>Классика</midiplayer.modeclassic>
+  <midiplayer.modelead>Соло (lead)</midiplayer.modelead>
+  <midiplayer.modecrunch>Кранч (crunch)</midiplayer.modecrunch>
+  <midiplayer.modebass>Бас</midiplayer.modebass>
+  <midiplayer.modesteel>Сталь (steel)</midiplayer.modesteel>
+  <midiplayer.modeacoustic>Акустика</midiplayer.modeacoustic>
+  <midiplayer.modeacousticsoft>Мягкий перебор (soft)</midiplayer.modeacousticsoft>
+  <midiplayer.guitaracousticmode>Режим гитары</midiplayer.guitaracousticmode>
 </infotexts>

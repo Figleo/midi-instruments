@@ -17,4 +17,13 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midiplayer.volumehint>* Volume: Esc -&gt; Settings -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
   <midiplayer.jamtitle>Play Together:</midiplayer.jamtitle>
   <midiplayer.jamming>Playing together...  |  Stop to leave</midiplayer.jamming>
+  <midiplayer.guitarmode>Guitar Mode</midiplayer.guitarmode>
+  <midiplayer.modeclassic>Classic</midiplayer.modeclassic>
+  <midiplayer.modelead>Lead</midiplayer.modelead>
+  <midiplayer.modecrunch>Crunch</midiplayer.modecrunch>
+  <midiplayer.modebass>Bass</midiplayer.modebass>
+  <midiplayer.modesteel>Steel</midiplayer.modesteel>
+  <midiplayer.modeacoustic>Acoustic</midiplayer.modeacoustic>
+  <midiplayer.modeacousticsoft>Fingers Soft</midiplayer.modeacousticsoft>
+  <midiplayer.guitaracousticmode>Guitar Mode</midiplayer.guitaracousticmode>
 </infotexts>

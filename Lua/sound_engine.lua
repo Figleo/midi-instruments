@@ -84,7 +84,14 @@ end
 function SoundEngine.init()
     if SoundEngine.initialized or _loadQueue ~= nil then return end
 
-    local instruments = { "accordion", "guitar", "guitarelectric", "harmonica" }
+    local instruments = { "accordion",
+        "guitar",
+        -- Electric guitar modes
+        "guitarelectric", "guitarelectric_lead", "guitarelectric_crunch", "guitarelectric_bass",
+        -- Acoustic guitar alt banks
+        "guitar_acoustic", "guitar_acoustic_soft",
+        "harmonica"
+    }
     _loadQueue        = {}
     _loadIdx          = 1
 

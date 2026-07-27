@@ -33,6 +33,28 @@
     "KeywordExclusions": []
   },
   {
+    "Keyword": "Sounds/guitarelectric_lead_notes/guitarelectric_lead_",
+    "GainMult": 0.9,
+    "RangeMult": 0.6,
+    "SidechainMult": 0,
+    "SidechainRelease": 0,
+    "Distortion": false,
+    "PitchMult": 1,
+    "MuffleInfluence": 1.3,
+    "KeywordExclusions": []
+  },
+  {
+    "Keyword": "Sounds/guitarelectric_crunch_notes/guitarelectric_crunch_",
+    "GainMult": 0.9,
+    "RangeMult": 0.6,
+    "SidechainMult": 0,
+    "SidechainRelease": 0,
+    "Distortion": false,
+    "PitchMult": 1,
+    "MuffleInfluence": 1.3,
+    "KeywordExclusions": []
+  },
+  {
     "Keyword": "Sounds/harmonica_notes/harmonica_",
     "GainMult": 0.9,
     "RangeMult": 0.6,
