@@ -39,6 +39,10 @@ local STOP_ALL_DEBOUNCE_MS   = 50
 local _lastCleanupTime       = 0
 local CLEANUP_THROTTLE_MS    = 30
 
+-- How long before the sample's end a looping channel is faded out. Must
+-- comfortably exceed the cleanup throttle so the buffer never wraps audibly.
+local LOOP_KILL_MARGIN_MS    = 80
+
 -- position tracking throttle (audio panning is imperceptible below ~10Hz)
 local _lastPosUpdateTime     = 0
 local POS_UPDATE_THROTTLE_MS = 10
@@ -261,8 +265,11 @@ local function cleanupDead()
     _lastCleanupTime = now
 
     for i = #SoundEngine.activeChannels, 1, -1 do
-        if not safeAlive(SoundEngine.activeChannels[i].channel) then
+        local info = SoundEngine.activeChannels[i]
+        if not safeAlive(info.channel) then
             disposeChannel(i)
+        elseif info.endsAt and now >= info.endsAt then
+            fadeDisposeChannel(i)
         end
     end
 end
@@ -323,7 +330,25 @@ local function updatePositions()
 
             if pos then
                 pcall(function()
+                    -- Contention check: if the channel is not where we last put
+                    -- it, another mod is steering it (Soundproof Walls pins
+                    -- loose sounds to their strike point every tick). Pushing
+                    -- back makes the sound stutter between the two positions,
+                    -- so cede the channel and let the other mod own it.
+                    local last = info.lastSetPos
+                    if last then
+                        local cur = info.channel.Position
+                        if cur then
+                            local dx = cur.X - last.x
+                            local dy = cur.Y - last.y
+                            if dx * dx + dy * dy > 4 then
+                                info.positional = false
+                                return
+                            end
+                        end
+                    end
                     info.channel.Position = Vector3(pos.X, pos.Y, 0)
+                    info.lastSetPos = { x = pos.X, y = pos.Y }
                 end)
             end
         end
@@ -384,11 +409,26 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     if not channel then return nil end
 
     -- Positional properties (pitch already set via Play above)
+    local endsAt = nil
     if worldPos then
         pcall(function()
             channel.Near     = SOUND_NEAR
             channel.Far      = SOUND_RANGE
             channel.Position = Vector3(worldPos.X, worldPos.Y, 0)
+        end)
+
+        -- Soundproof Walls compat: SPW freezes non-looping channels at their
+        -- strike point and tugs them back every tick, fighting our live
+        -- tracking (audible stutter while the performer walks). Looping
+        -- channels are exempt: SPW re-reads their position every tick. So
+        -- mark the channel looping and dispose it ourselves just before the
+        -- buffer would wrap, which nobody can hear on a decaying sample.
+        pcall(function()
+            local durMs = (sound.DurationSeconds / freqMult) * 1000
+            if durMs > LOOP_KILL_MARGIN_MS * 2 then
+                channel.Looping = true
+                endsAt = (os_clock() * 1000) + durMs - LOOP_KILL_MARGIN_MS
+            end
         end)
     end
 
@@ -402,6 +442,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
         instrument = instrument,
         velGain    = velGain,
         charID     = charID,
+        endsAt     = endsAt,
         positional = worldPos ~= nil -- only 3D channels get live-tracked
     })
 
