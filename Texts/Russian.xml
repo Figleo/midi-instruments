@@ -7,6 +7,7 @@
   <midiplayer.nofiles>MIDI-файлы не найдены!
 Установите 'MIDI Storage' из Мастерской</midiplayer.nofiles>
   <midiplayer.search>Поиск:</midiplayer.search>
+  <midiplayer.openfolder>Папка</midiplayer.openfolder>
   <midiplayer.refresh>Обновить</midiplayer.refresh>
   <midiplayer.play>Играть</midiplayer.play>
   <midiplayer.stop>Стоп</midiplayer.stop>

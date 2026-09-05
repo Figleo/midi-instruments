@@ -354,7 +354,7 @@ end
 local CACHE_MAX = 12
 
 MidiParser._cache = {}
-MidiParser._cacheOrder = {} -- insertion order, oldest first
+MidiParser._cacheOrder = {} -- least recently used first
 
 function MidiParser.clearCache()
     for k in pairs(MidiParser._cache) do
@@ -365,16 +365,26 @@ function MidiParser.clearCache()
     end
 end
 
-local function cachePut(filePath, entry)
-    if MidiParser._cache[filePath] == nil then
-        tinsert(MidiParser._cacheOrder, filePath)
-        -- Drops the oldest entry, not the least recently used. Fine unless
-        -- someone rotates through more than CACHE_MAX files in one session.
-        while #MidiParser._cacheOrder > CACHE_MAX do
-            local oldest = MidiParser._cacheOrder[1]
-            table.remove(MidiParser._cacheOrder, 1)
-            MidiParser._cache[oldest] = nil
+-- Drop a path from the recency list. Linear, but CACHE_MAX is 12.
+local function orderRemove(filePath)
+    for i = #MidiParser._cacheOrder, 1, -1 do
+        if MidiParser._cacheOrder[i] == filePath then
+            table.remove(MidiParser._cacheOrder, i)
+            return
         end
+    end
+end
+
+local function cachePut(filePath, entry)
+    orderRemove(filePath)
+    tinsert(MidiParser._cacheOrder, filePath)
+    -- Front of the list is the least recently used, because cacheGet moves
+    -- every hit to the back. Rotating through more than CACHE_MAX files used to
+    -- evict by age instead, which threw away the entry about to be asked for.
+    while #MidiParser._cacheOrder > CACHE_MAX do
+        local lru = MidiParser._cacheOrder[1]
+        table.remove(MidiParser._cacheOrder, 1)
+        MidiParser._cache[lru] = nil
     end
     MidiParser._cache[filePath] = entry
 end
@@ -404,14 +414,13 @@ local function cacheGet(filePath)
 
     if entry.fileSize ~= getFileSize(filePath) then
         MidiParser._cache[filePath] = nil
-        for i = #MidiParser._cacheOrder, 1, -1 do
-            if MidiParser._cacheOrder[i] == filePath then
-                table.remove(MidiParser._cacheOrder, i)
-                break
-            end
-        end
+        orderRemove(filePath)
         return nil
     end
+
+    -- Touch: a hit becomes the most recently used, so eviction takes the front.
+    orderRemove(filePath)
+    tinsert(MidiParser._cacheOrder, filePath)
     return entry
 end
 
@@ -564,30 +573,76 @@ local function scanFolder(dir, results)
     return count
 end
 
+-- Root of the MIDI Storage workshop mod. Two install layouts to cover:
+--   from the Workshop - storage sits next to us under WorkshopMods/Installed,
+--                       and our own path is the only thing we need
+--   from LocalMods    - storage is still under WorkshopMods/Installed, which
+--                       lives in the user's save folder, nowhere near us. No
+--                       relative path reaches it, so ask the game where it is.
+-- First candidate that actually exists wins. If none do, the first is returned
+-- anyway so callers have a concrete path to show the user.
+local function getStoragePath()
+    local candidates = {}
+
+    local sibling = (MidiMod.BasePath or ""):match("(.*[/\\])[^/\\]+[/\\]?$")
+    if sibling then
+        candidates[#candidates + 1] = sibling .. MIDI_STORAGE_WORKSHOP_ID
+    end
+
+    -- ContentPackage.WorkshopModsDir is "<save folder>/WorkshopMods/Installed",
+    -- resolved by the game, so it is right on Windows and Linux alike. Not
+    -- registered with Lua by default, hence the RegisterType.
+    pcall(function()
+        LuaUserData.RegisterType("Barotrauma.ContentPackage")
+        local dir = LuaUserData.CreateStatic("Barotrauma.ContentPackage").WorkshopModsDir
+        if dir and tostring(dir) ~= "" then
+            candidates[#candidates + 1] = tostring(dir) .. "/" .. MIDI_STORAGE_WORKSHOP_ID
+        end
+    end)
+
+    for i = 1, #candidates do
+        local exists = false
+        pcall(function() exists = File.DirectoryExists(candidates[i]) end)
+        if exists then return candidates[i] end
+    end
+    return candidates[1]
+end
+
+-- The folder users are told to drop .mid files into. Exposed so the GUI's
+-- "open folder" button and the scan below cannot point at different places.
+function MidiParser.getStorageMidiPath()
+    local storagePath = getStoragePath()
+    return storagePath and (storagePath .. "/Midi") or nil
+end
+
 function MidiParser.listMidiFiles()
     local files = {}
     local basePath = MidiMod.BasePath or ""
 
     -- Workshop storage
-    local workshopFolder = basePath:match("(.*[/\\])[^/\\]+[/\\]?$")
-    local storageMidiPath = nil
+    local storagePath = getStoragePath()
+    local storageMidiPath = MidiParser.getStorageMidiPath()
 
-    if workshopFolder then
-        local storagePath = workshopFolder .. MIDI_STORAGE_WORKSHOP_ID
-        storageMidiPath = storagePath .. "/Midi"
-
+    if storagePath then
         scanFolder(storagePath, files)
         scanFolder(storageMidiPath, files)
     end
 
-    -- Local folder - controlled by MidiMod.Debug
-    if MidiMod.Debug then
-        local localDir = basePath .. "Midi"
-        local count = scanFolder(localDir, files)
-        if count > 0 then
-            MidiMod.DebugLog("[MidiParser] Loaded " .. count .. " files from " .. localDir)
-        end
+    -- The mod's own Midi folder. Scanned unconditionally: this used to hang off
+    -- MidiMod.Debug, so a release build ignored files dropped here for a reason
+    -- that had nothing to do with logging.
+    local localDir = basePath .. "Midi"
+    local count = scanFolder(localDir, files)
+    if count > 0 then
+        MidiMod.DebugLog("[MidiParser] Loaded " .. count .. " files from " .. localDir)
     end
+
+    -- Alphabetical by file name rather than by full path: the scan walks
+    -- several folders in turn, so otherwise the list comes out grouped by
+    -- folder and looks unsorted to anyone reading it.
+    table.sort(files, function(a, b)
+        return (a:match("([^/\\]+)$") or a):lower() < (b:match("([^/\\]+)$") or b):lower()
+    end)
 
     if #files > 0 then
         MidiMod.Log("[MidiParser] Found " .. #files .. " MIDI files")

@@ -7,6 +7,7 @@
   <midiplayer.nofiles>No MIDI files found!
 Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midiplayer.search>Search:</midiplayer.search>
+  <midiplayer.openfolder>Folder</midiplayer.openfolder>
   <midiplayer.refresh>Refresh</midiplayer.refresh>
   <midiplayer.play>Play</midiplayer.play>
   <midiplayer.stop>Stop</midiplayer.stop>

@@ -38,6 +38,49 @@ local function L(tag, fallback)
     return fallback
 end
 
+-- Revealed by openMidiFolder when it cannot open anything: a text box holding
+-- the real path, so it can at least be selected and copied. The console cannot
+-- serve that purpose - the game rewrites the user name there to "USERNAME".
+local pathBox = nil
+
+-- Open the MIDI folder in the OS file manager. Process.Start directly, rather
+-- than the tidier ToolBox.OpenFileWithShell: ToolBox is an internal class and
+-- LuaCs hides its members from Lua ("cannot access field OpenFileWithShell"),
+-- MakeMethodAccessible included. Process is public, which is the visibility
+-- that does work here - the same reason ContentPackage resolves the path.
+local function openMidiFolder()
+    local dir = MidiMod.MidiParser and MidiMod.MidiParser.getStorageMidiPath()
+    if not dir then
+        MidiMod.Log("[GUI] No MIDI folder resolved (MIDI Storage not installed?)")
+        return
+    end
+
+    -- Barotrauma hands out forward slashes even on Windows; Explorer wants
+    -- backslashes. Drive letter or UNC prefix means Windows - a Unix path has
+    -- neither, so its slashes are left alone and xdg-open gets it as-is.
+    local isWindows = dir:match("^%a:") ~= nil or dir:match("^\\\\") ~= nil
+    if isWindows then dir = dir:gsub("/", "\\") end
+
+    local ok, err = pcall(function()
+        -- Plain name first; Process lives outside the game assembly, so the
+        -- assembly-qualified form is needed if Type.GetType has to find it.
+        pcall(LuaUserData.RegisterType, "System.Diagnostics.Process")
+        pcall(LuaUserData.RegisterType, "System.Diagnostics.Process, System.Diagnostics.Process")
+        LuaUserData.CreateStatic("System.Diagnostics.Process")
+            .Start(isWindows and "explorer.exe" or "xdg-open", '"' .. dir .. '"')
+    end)
+    if ok then return end
+
+    MidiMod.Log("[GUI] Could not open folder: " .. tostring(err))
+    MidiMod.Log("[GUI] Path shown in the panel (console rewrites the user name)")
+    if pathBox then
+        pcall(function()
+            pathBox.Text    = dir
+            pathBox.Visible = true
+        end)
+    end
+end
+
 -- === UI state ===
 local frame                  = nil
 local panelFrame             = nil
@@ -66,6 +109,11 @@ local pendingSeekScroll      = nil
 local lastSliderDragTime     = 0
 
 local lastSearch             = ""
+-- Set when Refresh turns an empty list into a non-empty one: that layout has no
+-- list box to fill, so the panel has to be rebuilt. Deferred to the think hook
+-- rather than done in the click handler, which would tear down the very button
+-- being clicked.
+local pendingRebuild         = false
 local savedPanelScreenOffset        = nil
 local savedModeScreenOffset         = nil
 local savedAcousticModeScreenOffset = nil
@@ -416,6 +464,7 @@ local function destroyPanel()
     statusLabel       = nil
     fileListBox       = nil
     searchBox         = nil
+    pathBox           = nil
     progressSlider    = nil
     progressTimeLabel = nil
     nowPlayingLabel   = nil
@@ -485,49 +534,60 @@ local function createPanel()
     )
     contentList.RectTransform.AbsoluteOffset = Point(0, 6)
 
-    -- === No-files fallback ===
-    if #MGUI.midiFiles == 0 then
-        local noFiles     = GUI.TextBlock(
+    local hasFiles = #MGUI.midiFiles > 0
+
+    -- === No-files notice ===
+    if not hasFiles then
+        local noFiles        = GUI.TextBlock(
             GUI.RectTransform(Vector2(1, 0.20), contentList.Content.RectTransform),
             L("nofiles", "No MIDI files found!\nInstall 'MIDI Storage' from Workshop"),
             nil, nil, GUI.Alignment.Center
         )
-        noFiles.TextColor = Color(255, 100, 100)
-        noFiles.Wrap      = true
-        MGUI.isOpen       = true
-        return
-    end
-
-    if not MGUI.selectedFile then
+        noFiles.TextColor    = Color(255, 100, 100)
+        noFiles.Wrap         = true
+        noFiles.CanBeFocused = false
+    elseif not MGUI.selectedFile then
         MGUI.selectedFile = MGUI.midiFiles[1]
     end
 
-    -- === Search label ===
+    -- === Search row ===
+    --   [Search:          ] [Refresh]
+    --   [ textbox........ ] [Folder ]
+    -- All four in one frame on purpose. A TextBlock parented straight to the
+    -- content list becomes one of the list's rows, which is why the label used
+    -- to draw a border and light up under the cursor.
+    -- Built even with no files: Folder is how the user finds out where the files
+    -- go and Refresh is how they get picked up afterwards, so this row is worth
+    -- more in that state than in any other. Only the search half is pointless.
+    local searchRow         = GUI.Frame(
+        GUI.RectTransform(Vector2(1, 0.11), contentList.Content.RectTransform),
+        nil
+    )
+    searchRow.CanBeFocused  = false
+
+    -- Heights below add up to just under the row, so each pair sits tight
+    -- around the middle instead of being pushed to the row's edges.
     local searchLabel       = GUI.TextBlock(
-        GUI.RectTransform(Vector2(1, 0.05), contentList.Content.RectTransform),
+        GUI.RectTransform(Vector2(0.76, 0.32), searchRow.RectTransform, GUI.Anchor.TopLeft),
         L("search", "Search:"),
         nil, nil, GUI.Alignment.CenterLeft
     )
     searchLabel.TextColor   = Color(160, 160, 160)
     searchLabel.Padding     = Vector4(4, 0, 0, 0)
-
-    -- === Search row: [TextBox.......] [Refresh] ===
-    local searchRow         = GUI.Frame(
-        GUI.RectTransform(Vector2(1, 0.09), contentList.Content.RectTransform),
-        nil
-    )
-    searchRow.CanBeFocused  = false
+    searchLabel.CanBeFocused = false
 
     searchBox               = GUI.TextBox(
-        GUI.RectTransform(Vector2(0.76, 1), searchRow.RectTransform, GUI.Anchor.CenterLeft),
+        GUI.RectTransform(Vector2(0.76, 0.62), searchRow.RectTransform, GUI.Anchor.BottomLeft),
         lastSearch
     )
     searchBox.MaxTextLength = 80
     lastSearch              = searchBox.Text or ""
+    searchLabel.Visible     = hasFiles
+    searchBox.Visible       = hasFiles
 
     -- Refresh button: rescans files from disk AND applies current search filter.
     local refreshBtn        = GUI.Button(
-        GUI.RectTransform(Vector2(0.22, 1), searchRow.RectTransform, GUI.Anchor.CenterRight),
+        GUI.RectTransform(Vector2(0.22, 0.48), searchRow.RectTransform, GUI.Anchor.TopRight),
         L("refresh", "Refresh"), GUI.Alignment.Center, "GUIButtonSmall"
     )
     refreshBtn.OnClicked    = function()
@@ -542,8 +602,34 @@ local function createPanel()
             end
         end
         if not stillExists then MGUI.selectedFile = MGUI.midiFiles[1] end
+        if not hasFiles and #MGUI.midiFiles > 0 then
+            pendingRebuild = true
+            return true
+        end
         rebuildFileList(lastSearch)
         return true
+    end
+
+    -- Folder button: same size as Refresh, directly below it.
+    local folderBtn         = GUI.Button(
+        GUI.RectTransform(Vector2(0.22, 0.48), searchRow.RectTransform, GUI.Anchor.BottomRight),
+        L("openfolder", "Folder"), GUI.Alignment.Center, "GUIButtonSmall"
+    )
+    folderBtn.OnClicked     = function()
+        openMidiFolder()
+        return true
+    end
+
+    -- Hidden until openMidiFolder fails; then it holds the real path to copy.
+    pathBox                 = GUI.TextBox(
+        GUI.RectTransform(Vector2(1, 0.06), contentList.Content.RectTransform), ""
+    )
+    pathBox.Visible         = false
+
+    -- Everything below needs a file list to act on.
+    if not hasFiles then
+        MGUI.isOpen = true
+        return
     end
 
     -- === Scrollable file list ===
@@ -617,6 +703,7 @@ local function createPanel()
     jamTitleLabel.TextColor     = Color(255, 220, 120)
     jamTitleLabel.Padding       = Vector4(4, 0, 0, 0)
     jamTitleLabel.Visible       = false
+    jamTitleLabel.CanBeFocused  = false
 
     jamListBox                  = GUI.ListBox(
         GUI.RectTransform(Vector2(1, 0.16), contentList.Content.RectTransform)
@@ -666,6 +753,7 @@ local function createPanel()
     nowPlayingLabel.TextColor = Color(100, 255, 140)
     nowPlayingLabel.Wrap      = true
     nowPlayingLabel.Visible   = false
+    nowPlayingLabel.CanBeFocused = false
 
     -- === Status ===
     statusLabel               = GUI.TextBlock(
@@ -674,6 +762,7 @@ local function createPanel()
         nil, nil, GUI.Alignment.Center
     )
     statusLabel.TextColor     = Color(140, 140, 140)
+    statusLabel.CanBeFocused  = false
 
     -- === Hints ===
     local volHint             = GUI.TextBlock(
@@ -683,6 +772,7 @@ local function createPanel()
     )
     volHint.TextColor         = Color(100, 100, 100)
     volHint.Wrap              = true
+    volHint.CanBeFocused      = false
 
     MGUI.isOpen               = true
 end
@@ -712,6 +802,12 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     local f5Pressed = false
     pcall(function() f5Pressed = PlayerInput.KeyHit(Keys.F5) end)
     if f5Pressed and holdingNow then MGUI.togglePanel() end
+
+    -- Refresh found the first files: swap the empty layout for the real one.
+    if pendingRebuild then
+        pendingRebuild = false
+        if MGUI.isOpen then MGUI.togglePanel(true) end
+    end
 
     if MGUI.isOpen and searchBox then
         local currentText = ""

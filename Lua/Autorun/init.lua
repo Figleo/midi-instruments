@@ -28,7 +28,7 @@ MidiMod.Version = readVersionFromXML()
 
 -- ====== SINGLE DEBUG TOGGLE ======
 -- Set to true to enable all debug logging across the entire mod.
-MidiMod.Debug = true
+MidiMod.Debug = false
 
 -- Client-side volume (loaded from companion mod XML settings)
 MidiMod.CurrentVolume = 0.75
