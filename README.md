@@ -27,8 +27,7 @@ Install the [MIDI Storage Mod](https://steamcommunity.com/workshop/filedetails/?
 - **Linux**: `~/.local/share/Daedalic Entertainment GmbH/Barotrauma/WorkshopMods/Installed/3695216167/Midi/`
 
 ### Option 2: Local Mod Folder (Debug Mode)
-When `MidiMod.Debug = true` in `Lua/Autorun/init.lua`, files will be read directly from:
-- `<ModDirectory>/Midi/`
+Files will be read automatically from `<ModDirectory>/Midi/`
 
 ## Controls & Usage
 
