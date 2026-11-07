@@ -44,4 +44,13 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midispw.serveroverride>notes is in both local lists, but the server's SPW settings currently control audio. The host or a player with Manage Settings permission must press this button to add notes to the server lists.</midispw.serveroverride>
   <midispw.unavailable>Soundproof Walls is not loaded. Enable SPW and C# mod support in LuaCs, then reload mods.</midispw.unavailable>
   <midispw.failed>Could not finish applying SPW settings. See the console for error details and check the SPW lists before trying again.</midispw.failed>
+  <midijamrange.help>midijamrange [100..50000] - show the Play Together radius or set it as the host. Default: 2000.</midijamrange.help>
+  <midijamrange.current>Play Together radius: [range].</midijamrange.current>
+  <midijamrange.changed>Play Together radius set to [range] and saved. Applies immediately.</midijamrange.changed>
+  <midijamrange.invalid>Usage: midijamrange [100..50000]. Enter one whole number.</midijamrange.invalid>
+  <midijamrange.hostonly>Only the host can change the Play Together radius. On a dedicated server, use the server console.</midijamrange.hostonly>
+  <midijamrange.waiting>Requesting the Play Together radius from the server...</midijamrange.waiting>
+  <midijamrange.savefailed>Play Together radius set to [range], but could not be saved. It will reset after restarting.</midijamrange.savefailed>
+  <midijamrange.outofrange>The performer is outside the Play Together radius ([range]).</midijamrange.outofrange>
+  <midijamrange.left>Play Together stopped: the leader is outside the radius of [range].</midijamrange.left>
 </infotexts>

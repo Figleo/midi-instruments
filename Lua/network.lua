@@ -148,10 +148,7 @@ function Network.initServer()
         Hook.Call("MidiMod.Server.BuffStop", charID)
     end)
 
-    -- Jam announce: relay "who performs / who mirrors whom" to other clients.
-    -- mirrorOf is a claim about somebody else's charID and stays as sent - the
-    -- worst it can do is make a mirror follow the wrong leader, and only the
-    -- announcing client's own instrument is affected.
+    -- Relay performer and mirror announcements. Mirror links require a valid group distance.
     Networking.Receive(NET_JAM, function(message, client)
         message.ReadUInt16()
         local fileName = message.ReadString()
@@ -170,6 +167,16 @@ function Network.initServer()
         -- the same charID and play every note twice - and the second channel
         -- overwrites the first's uid, so the first never gets released.
         if mirrorOf == charID then mirrorOf = 0 end
+
+        if mirrorOf ~= 0 and not MidiMod.CanJamWith(client.Character, mirrorOf) then
+
+            -- Notify the sender too: it may already be mirroring locally.
+            local stop = Networking.Start(NET_STOP)
+            stop.WriteUInt16(charID)
+            for _, c in pairs(Client.ClientList) do Networking.Send(stop, c.Connection) end
+            Hook.Call("MidiMod.Server.BuffStop", charID)
+            return
+        end
 
         local broadcast = Networking.Start(NET_JAM)
         broadcast.WriteUInt16(charID)
@@ -245,6 +252,12 @@ function Network.initClient()
                     durMs      = durSec * 1000,
                 }
             else
+                local mirror = nil
+                pcall(function() mirror = Entity.FindEntityByID(charID) end)
+                if not MidiMod.CanJamWith(mirror, mirrorOf) then
+                    MidiMod.Player.stopChar(charID)
+                    return
+                end
                 MidiMod.Player.jamMirrors[charID] = {
                     leaderID   = mirrorOf,
                     receivedAt = os_clock(),
@@ -298,13 +311,13 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
     -- mirror hears the leader's instrument but not its own.
     if ourID and MidiMod.Player and MidiMod.Player.jamLeaderID == charID then
         local ourChar = Character.Controlled
-        if ourChar then
+        if ourChar and MidiMod.CanJamWith(ourChar, charID) then
             local ourInst, ourItem = MidiMod.GetHeldInstrument(ourChar)
             if ourInst then
                 local ourPos = nil
                 pcall(function() ourPos = ourItem.WorldPosition end)
-                -- Our own instrument honors our local mode switch
-                targets[#targets + 1] = { id = ourID, inst = MidiMod.ActiveSoundBank(ourInst), pos = ourPos }
+
+                targets[#targets + 1] = { id = ourID, inst = MidiMod.ActiveSoundBank(ourInst), pos = ourPos, leaderID = charID }
             end
         end
     end
@@ -329,7 +342,7 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
                             -- The mirror's announced sound bank (mode switch)
                             -- wins over the raw held-instrument id.
                             local mEntry = MidiMod.Player.jamMirrors[mID]
-                            targets[#targets + 1] = { id = mID, inst = (mEntry and mEntry.mode) or mInst, pos = mPos }
+                            targets[#targets + 1] = { id = mID, inst = (mEntry and mEntry.mode) or mInst, pos = mPos, leaderID = charID }
                         end
                     end
                 end
@@ -360,6 +373,7 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
                     charID   = target.id,
                     instrId  = target.inst,
                     worldPos = target.pos,
+                    leaderID = target.leaderID,
                 }
             end
         end
@@ -400,10 +414,25 @@ if CLIENT then
 
         local now  = getNetTimeMs()
         local kept = 0
+        local cutMirrors = {}
 
         for i = 1, _noteBufLen do
             local entry = _noteBuffer[i]
-            if entry.playAt <= now then
+            local inRange = true
+            if entry.leaderID then
+                local mirror = nil
+                pcall(function() mirror = Entity.FindEntityByID(entry.charID) end)
+                inRange = MidiMod.CanJamWith(mirror, entry.leaderID)
+            end
+
+            -- A queued mirror note can move outside the group radius before playback.
+            if not inRange then
+
+                if not cutMirrors[entry.charID] and MidiMod.SoundEngine and MidiMod.SoundEngine.stopAllForChar then
+                    pcall(MidiMod.SoundEngine.stopAllForChar, entry.charID)
+                    cutMirrors[entry.charID] = true
+                end
+            elseif entry.playAt <= now then
                 if entry.vel == 0 then
                     if MidiMod.SoundEngine and MidiMod.SoundEngine.releaseNote then
                         pcall(MidiMod.SoundEngine.releaseNote, entry.note, entry.charID)
@@ -604,6 +633,12 @@ function Network.requestJoin(leaderCharID)
     if not entry then
         MidiMod.Log("Performer is no longer playing")
         return false, "gone"
+    end
+
+    -- Either character may have moved since the performer list was built.
+    if not MidiMod.CanJamWith(character, leaderCharID) then
+        MidiMod.Log("The performer is outside the Play Together radius (" .. MidiMod.JamRange .. ").")
+        return false, "outofrange"
     end
 
     -- Stop current playback / mirroring first

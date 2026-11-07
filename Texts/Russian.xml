@@ -44,4 +44,13 @@
   <midispw.serveroverride>notes есть в обоих локальных списках, но сейчас звук обрабатывается по настройкам SPW сервера. Хост или игрок с правом управления настройками должен нажать эту кнопку, чтобы добавить notes в серверные списки.</midispw.serveroverride>
   <midispw.unavailable>Soundproof Walls не загружен. Включите SPW и поддержку C# модов в LuaCs, затем перезагрузите моды.</midispw.unavailable>
   <midispw.failed>Не удалось завершить применение настроек SPW. Подробности ошибки — в консоли. Проверьте списки SPW перед повторным нажатием.</midispw.failed>
+  <midijamrange.help>midijamrange [100..50000] — показать радиус совместной игры или изменить его от имени хоста. По умолчанию: 2000.</midijamrange.help>
+  <midijamrange.current>Радиус совместной игры: [range].</midijamrange.current>
+  <midijamrange.changed>Радиус совместной игры установлен на [range] и сохранён. Применяется сразу.</midijamrange.changed>
+  <midijamrange.invalid>Использование: midijamrange [100..50000]. Введите одно целое число.</midijamrange.invalid>
+  <midijamrange.hostonly>Радиус совместной игры может менять только хост. На выделенном сервере используйте консоль сервера.</midijamrange.hostonly>
+  <midijamrange.waiting>Запрашиваю радиус совместной игры у сервера...</midijamrange.waiting>
+  <midijamrange.savefailed>Радиус совместной игры установлен на [range], но сохранить его не удалось. После перезапуска значение сбросится.</midijamrange.savefailed>
+  <midijamrange.outofrange>Исполнитель находится дальше радиуса совместной игры ([range]).</midijamrange.outofrange>
+  <midijamrange.left>Совместная игра остановлена: ведущий вышел за радиус [range].</midijamrange.left>
 </infotexts>

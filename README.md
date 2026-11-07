@@ -33,6 +33,21 @@ The server (or singleplayer) saves the value to
 does not overwrite your saved setting. Playback still uses `Sound.Play` for
 Soundproof Walls compatibility; SPW's `RangeMult` does not multiply this radius.
 
+**Play Together** has a separate radius, defaulting to `2000` game units from
+the leader. Use `midijamrange` to show it or `midijamrange 3000` to set it.
+The command accepts whole numbers from `100` to `50000`; in multiplayer only
+the host can change it, or use the dedicated server's own console. The value
+is saved to `<game save folder>/ModConfigs/MidiInstruments_JamRange.txt` and
+synchronized with all clients, including late joiners. Guests retain their
+own saved setting for hosting. Radius changes apply to existing groups too.
+Only nearby performers appear in the join list; the client rechecks
+distance when joining and the server validates mirror announcements too.
+Distance uses character world positions, including submarine offsets. Moving
+outside the radius ends mirroring and cuts the follower's sounding/queued
+notes. Return within range and press the performer button to join again.
+The leader's ordinary playback continues. `midirange` changes sound radius
+independently of this group limit.
+
 ## Soundproof Walls: preserve MIDI pitch at a distance and in motion
 
 This mod includes a client-only compatibility patch for Soundproof Walls. You

@@ -139,14 +139,14 @@ function Player.stopChar(charID)
     Player.activePerformers[charID] = nil
     Player.jamMirrors[charID] = nil
 
-    -- If this is our own character, do a full stop
-    if Player.sourceCharacter then
-        local ourID = nil
-        pcall(function() ourID = Player.sourceCharacter.ID end)
-        if ourID and ourID == charID then
-            Player.stop()
-            return
-        end
+    local ourID = nil
+    pcall(function()
+        local ownCharacter = Player.sourceCharacter or (CLIENT and Character.Controlled)
+        if ownCharacter then ourID = ownCharacter.ID end
+    end)
+    if ourID and ourID == charID then
+        Player.stop()
+        return
     end
 
     -- Cascade: the leader we mirror stopped, so we stop too. Clear
@@ -193,7 +193,7 @@ function Player.getPerformers()
     for charID, entry in pairs(Player.activePerformers) do
         if (now - entry.receivedAt) > PERFORMER_TTL_SEC then
             Player.activePerformers[charID] = nil
-        elseif charID ~= ourID then
+        elseif charID ~= ourID and MidiMod.CanJamWith(Character.Controlled, charID) then
             result[charID] = entry
         end
     end
@@ -209,8 +209,16 @@ function Player.getMirrorsOf(leaderID)
         if (now - entry.receivedAt) > PERFORMER_TTL_SEC then
             Player.jamMirrors[charID] = nil
         elseif entry.leaderID == leaderID then
-            result = result or {}
-            result[#result + 1] = charID
+            local mirror = nil
+            pcall(function() mirror = Entity.FindEntityByID(charID) end)
+            if MidiMod.CanJamWith(mirror, leaderID) then
+                result = result or {}
+                result[#result + 1] = charID
+            else
+
+                -- Drop the stale mirror link along with its sustained and queued notes.
+                Player.stopChar(charID)
+            end
         end
     end
     return result
@@ -597,6 +605,17 @@ local function mirrorThink()
         -- Drop the leader from the jam list and cut whatever of its notes is
         -- still sounding or sitting in the jitter buffer.
         Player.stopChar(leaderID)
+        return
+    end
+
+    if not MidiMod.CanJamWith(ch, leaderID) then
+        MidiMod.Log("Play Together stopped: the leader is outside the radius of " .. MidiMod.JamRange .. ".")
+        Player.jamLeaderID = nil
+        if MidiMod.Network then
+            MidiMod.Network.requestStop(charID)
+        else
+            Player.stop()
+        end
         return
     end
 
