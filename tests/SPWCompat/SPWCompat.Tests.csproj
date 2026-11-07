@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="../../CSharp/SpwDistancePitch.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="Preferences.cs" />
     <Reference Include="Barotrauma"><HintPath>$(BarotraumaDir)/Publicized/Barotrauma.dll</HintPath></Reference>
     <Reference Include="BarotraumaCore"><HintPath>$(BarotraumaDir)/Publicized/BarotraumaCore.dll</HintPath></Reference>
     <Reference Include="0Harmony"><HintPath>$(BarotraumaDir)/0Harmony.dll</HintPath></Reference>

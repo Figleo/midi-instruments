@@ -44,6 +44,28 @@ other SPW pitch effects, muffling and reverb retain their existing behavior.
 Your `ReverbForcedSounds` and `XMLIgnoredSounds` entries can stay as configured.
 Do not add MIDI samples to `PitchIgnoredSounds`, which forces pitch to `1.0`.
 
+To configure muffling and reverb, open **Settings → Mod Gameplay Settings →
+MIDI Instruments** and press **SPW patch** below the MIDI volume control. This
+adds `notes` to **XML Ignored Sounds** (`XMLIgnoredSounds`) and **Reverb Forced
+Sounds** (`ReverbForcedSounds`). Each list is checked independently, ignoring
+letter case, so repeated clicks do not add duplicates. Existing entries and
+other preferences are preserved. SPW saves its own configuration to
+`<game save folder>/ModConfigs/SoundproofWalls_Config.json` and refreshes sound
+metadata using its normal settings API.
+
+The button acts immediately and displays the result; the MIDI menu's Apply or
+Reset buttons do not run it. Nothing adds `notes` on startup, so players can
+remove or change these entries later in SPW's settings. This button configures
+the two lists; the automatic distance-pitch compatibility patch above runs
+independently of it.
+
+If SPW is using synchronized server settings, the host or a player with
+**Manage Settings** permission can press the same button to send the updated
+server lists through SPW. This preserves the active server's other preferences
+and each user's local preferences. Guests save their local lists; if the
+server lists are missing `notes`, the result explains that the host needs to
+apply it. With synchronization disabled, each player applies their local lists.
+
 Every player, including the host's client, needs the updated MIDI mod and LuaCs
 with C# mods enabled (also required for SPW itself). LuaCs compiles
 `CSharp/SpwDistancePitch.cs` automatically through `ModConfig.xml`; players do not

@@ -2,5 +2,7 @@
 <Configuration>
   <Settings>
     <Setting Name="MidiVolume" Type="rangeFloat" Min="0" Max="1" Steps="21" Value="0.75" />
+    <!-- LuaCs has no action setting type; the client plugin renders this entry as a button. -->
+    <Setting Name="SpwPatch" Type="string" Value="" />
   </Settings>
 </Configuration>

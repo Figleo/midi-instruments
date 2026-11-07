@@ -34,4 +34,14 @@
   <midirange.hostonly>Дальность звука инструментов может менять только хост. На выделенном сервере используйте консоль сервера.</midirange.hostonly>
   <midirange.waiting>Запрашиваю дальность звука инструментов у сервера...</midirange.waiting>
   <midirange.savefailed>Дальность звука инструментов установлена на [range], но сохранить её не удалось. После перезапуска значение сбросится.</midirange.savefailed>
+  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>Совместимость с Soundproof Walls</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>
+  <midispw.button>SPW патч</midispw.button>
+  <midispw.title>Soundproof Walls — MIDI</midispw.title>
+  <midispw.tooltip>Добавить notes в исключения XML-звуков и список принудительной реверберации. Сохранить настройки SPW. Существующие записи сохраняются, дубликаты не добавляются.</midispw.tooltip>
+  <midispw.changed>notes добавлено в исключения XML-звуков и список принудительной реверберации. Настройки SPW сохранены и применены. Позже вы можете изменить эти списки в SPW.</midispw.changed>
+  <midispw.unchanged>notes уже есть в обоих списках. Дубликаты не добавлены.</midispw.unchanged>
+  <midispw.uploaded>Локальные списки сохранены. Настройки с notes отправлены серверу через SPW; они применятся после синхронизации.</midispw.uploaded>
+  <midispw.serveroverride>notes есть в обоих локальных списках, но сейчас звук обрабатывается по настройкам SPW сервера. Хост или игрок с правом управления настройками должен нажать эту кнопку, чтобы добавить notes в серверные списки.</midispw.serveroverride>
+  <midispw.unavailable>Soundproof Walls не загружен. Включите SPW и поддержку C# модов в LuaCs, затем перезагрузите моды.</midispw.unavailable>
+  <midispw.failed>Не удалось завершить применение настроек SPW. Подробности ошибки — в консоли. Проверьте списки SPW перед повторным нажатием.</midispw.failed>
 </infotexts>

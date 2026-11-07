@@ -26,6 +26,7 @@ internal static partial class Program
             string path = Path.Combine(gameDirectory, name.Name + ".dll");
             return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
         };
+        RunPreferenceChecks();
         RunBehaviorChecks();
         if (args.Length > 1) RunInstalledSpwChecks(Path.GetFullPath(args[1]));
         Console.WriteLine("SPW compatibility: " + checks + " checks passed.");
@@ -116,6 +117,7 @@ internal static partial class Program
         // Validate the installed DLL without starting audio or SPW's file services.
         Assembly assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(spwFile);
         Type type = assembly.GetType("SoundproofWalls.ChannelInfo", true);
+        VerifyInstalledPreferencesApi(assembly);
         MethodInfo target = type.GetMethod("UpdatePitch", BindingFlags.Instance | BindingFlags.NonPublic);
         List<CodeInstruction> original = PatchProcessor.GetOriginalInstructions(target).ToList();
         List<CodeInstruction> changed = SpwDistancePitch.Transpile(original, target).ToList();

@@ -19,10 +19,11 @@ namespace MidiInstruments.Compatibility
     public sealed class SpwDistancePitchPlugin : IAssemblyPlugin
     {
         public void PreInitPatching() { }
-        public void Initialize() { }
+        public void Initialize() { SpwSettingsButton.Install(); }
         public void OnLoadCompleted() { SpwDistancePitch.TryInstallPatch(); }
         public void Dispose()
         {
+            SpwSettingsButton.Remove();
             SpwDistancePitch.RemovePatch();
         }
     }
@@ -170,4 +171,157 @@ namespace MidiInstruments.Compatibility
         }
     }
 
+    // Adding notes is a user action; startup leaves manually edited lists alone.
+    public static class SpwSoundPreferences
+    {
+        private static readonly string[] Lists = { "XMLIgnoredSounds", "ReverbForcedSounds" };
+
+        public static string Apply()
+        {
+            Type manager = AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType("SoundproofWalls.ConfigManager", false))
+                .LastOrDefault(type => type != null);
+            if (manager == null) return "midispw.unavailable";
+            bool multiplayer = GameMain.IsMultiplayer;
+            Client myClient = GameMain.Client?.MyClient;
+            bool canUpload = multiplayer && myClient != null
+                && (myClient.IsOwner || myClient.HasPermission(ClientPermissions.ManageSettings));
+            return ApplyToManager(manager, multiplayer, canUpload);
+        }
+
+        // Use SPW's public API so saving, sound metadata updates and synchronization follow its menu.
+        internal static string ApplyToManager(Type manager, bool multiplayer, bool canUpload)
+        {
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.Static;
+            FieldInfo localField = manager.GetField("LocalConfig", flags)
+                ?? throw new InvalidOperationException("SPW LocalConfig is unavailable");
+            Type configType = localField.FieldType;
+            PropertyInfo serverProperty = manager.GetProperty("ServerConfig", flags)
+                ?? throw new InvalidOperationException("SPW ServerConfig is unavailable");
+            MethodInfo clone = RequireMethod(manager, "CloneConfig", configType);
+            MethodInfo save = RequireMethod(manager, "SaveConfig", configType);
+            MethodInfo update = RequireMethod(manager, "UpdateConfig", configType, configType, typeof(bool), typeof(bool), typeof(byte));
+            MethodInfo upload = RequireMethod(manager, "UploadClientConfigToServer", typeof(bool));
+            object local = localField.GetValue(null)
+                ?? throw new InvalidOperationException("SPW local configuration is unavailable");
+            object server = serverProperty.GetValue(null);
+            object nextLocal = clone.Invoke(null, new[] { local });
+            // SPW's JSON clone omits the parsed keyboard or mouse binding.
+            PropertyInfo binding = configType.GetProperty("EavesdroppingKeyOrMouse");
+            if (binding != null && binding.CanRead && binding.CanWrite)
+                binding.SetValue(nextLocal, binding.GetValue(local));
+            bool localChanged = AddNotes(nextLocal);
+            object nextServer = server != null ? clone.Invoke(null, new[] { server }) : null;
+            bool serverChanged = nextServer != null && AddNotes(nextServer);
+
+            // Save before replacing the active config so write errors leave the live settings intact.
+            if (localChanged)
+            {
+                save.Invoke(null, new[] { nextLocal });
+                localField.SetValue(null, nextLocal);
+                if (server == null)
+                    update.Invoke(null, new object[] { nextLocal, local, false, false, (byte)0 });
+            }
+
+            if (multiplayer && canUpload)
+            {
+                if (server != null && serverChanged)
+                {
+                    // UploadClientConfigToServer serializes LocalConfig synchronously.
+                    // Temporarily use a copy of the active server config, then restore the player's local config.
+                    PropertyInfo sync = configType.GetProperty("SyncSettings")
+                        ?? throw new InvalidOperationException("SPW SyncSettings is unavailable");
+                    sync.SetValue(nextServer, true);
+                    object savedLocal = localField.GetValue(null);
+                    try
+                    {
+                        localField.SetValue(null, nextServer);
+                        upload.Invoke(null, new object[] { true });
+                    }
+                    finally { localField.SetValue(null, savedLocal); }
+                    return "midispw.uploaded";
+                }
+                if (server == null && localChanged
+                    && configType.GetProperty("SyncSettings")?.GetValue(nextLocal) is bool syncEnabled && syncEnabled)
+                {
+                    upload.Invoke(null, new object[] { true });
+                    return "midispw.uploaded";
+                }
+            }
+            if (serverChanged) return "midispw.serveroverride";
+            return localChanged ? "midispw.changed" : "midispw.unchanged";
+        }
+
+        private static MethodInfo RequireMethod(Type type, string name, params Type[] arguments)
+        {
+            return type.GetMethod(name, BindingFlags.Public | BindingFlags.Static, null, arguments, null)
+                ?? throw new InvalidOperationException("SPW " + name + " API is unavailable");
+        }
+
+        internal static bool AddNotes(object config)
+        {
+            // Validate both lists before changing either one to avoid partial updates.
+            HashSet<string>[] sets = Lists.Select(name =>
+                config.GetType().GetProperty(name)?.GetValue(config) as HashSet<string>
+                ?? throw new InvalidOperationException("SPW " + name + " list is unavailable")).ToArray();
+            bool changed = false;
+            foreach (HashSet<string> sounds in sets)
+            {
+                if (sounds.Any(sound => string.Equals(sound, "notes", StringComparison.OrdinalIgnoreCase))) continue;
+                changed |= sounds.Add("notes");
+            }
+            return changed;
+        }
+    }
+
+    internal static class SpwSettingsButton
+    {
+        private static readonly Harmony Patcher = new Harmony("MidiInstruments.SpwSettingsButton");
+        private static bool installed;
+
+        internal static void Install()
+        {
+            if (installed) return;
+            Patcher.Patch(AccessTools.Method(typeof(SettingEntry<string>), "AddDisplayComponent"),
+                prefix: new HarmonyMethod(typeof(SpwSettingsButton), nameof(AddButton)));
+            installed = true;
+        }
+
+        internal static bool IsButtonSetting(string name, string packageDirectory)
+        {
+            return name == "SpwPatch" && SpwDistancePitch.ModDirectory != null
+                && !string.IsNullOrEmpty(packageDirectory)
+                && string.Equals(Path.GetFullPath(packageDirectory).TrimEnd('/', '\\'),
+                    SpwDistancePitch.ModDirectory, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool AddButton(SettingEntry<string> __instance, GUILayoutGroup layoutGroup, Vector2 relativeSize)
+        {
+            if (!IsButtonSetting(__instance.InternalName, __instance.OwnerPackage?.Dir)) return true;
+            new GUIButton(new RectTransform(relativeSize, layoutGroup.RectTransform), TextManager.Get("midispw.button"))
+            {
+                ToolTip = TextManager.Get("midispw.tooltip"),
+                OnClicked = (_, __) =>
+                {
+                    string result;
+                    try { result = SpwSoundPreferences.Apply(); }
+                    catch (Exception error)
+                    {
+                        result = "midispw.failed";
+                        DebugConsole.ThrowError("[MidiMod] SPW preferences: " + error.GetBaseException().Message);
+                    }
+                    var messageBox = new GUIMessageBox(TextManager.Get("midispw.title"), TextManager.Get(result));
+                    return true;
+                }
+            };
+            // Button actions bypass the menu's value cache; Apply and Reset must not replay them.
+            return false;
+        }
+
+        internal static void Remove()
+        {
+            Patcher.UnpatchSelf();
+            installed = false;
+        }
+    }
 }
