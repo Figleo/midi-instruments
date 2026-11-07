@@ -26,9 +26,9 @@ MidiMod = MidiMod or {}
 MidiMod.BasePath = basePath
 MidiMod.Version = readVersionFromXML()
 
--- ====== SINGLE DEBUG TOGGLE ======
--- Set to true to enable all debug logging across the entire mod.
+-- Debug starts disabled. Use mididebug on/off in the console to change it locally.
 MidiMod.Debug = false
+MidiMod.SpwCompatibility = nil
 
 -- Client-side volume (loaded from companion mod XML settings)
 MidiMod.CurrentVolume = 0.75
@@ -112,13 +112,14 @@ MidiMod.Log("Base path: " .. MidiMod.BasePath)
 local function safeRequire(modName)
     local ok, err = pcall(require, modName)
     if not ok then
-        MidiMod.Log("ERROR loading module '" .. modName .. "': " .. tostring(err))
+        MidiMod.DebugLog("ERROR loading module '" .. modName .. "': " .. tostring(err))
         return false
     end
-    MidiMod.Log("Module '" .. modName .. "' loaded.")
+    MidiMod.DebugLog("Module '" .. modName .. "' loaded.")
     return true
 end
 
+safeRequire("debug_config")
 safeRequire("midi_parser")
 safeRequire("range_config")
 safeRequire("jam_range")
@@ -136,7 +137,7 @@ if CLIENT then
     if MidiMod.SoundEngine then
         local ok, err = pcall(MidiMod.SoundEngine.init)
         if not ok then
-            MidiMod.Log("ERROR initializing sound engine: " .. tostring(err))
+            MidiMod.DebugLog("ERROR initializing sound engine: " .. tostring(err))
         end
     end
 end
@@ -145,7 +146,7 @@ end
 if MidiMod.Network then
     local ok, err = pcall(MidiMod.Network.init)
     if not ok then
-        MidiMod.Log("ERROR initializing network: " .. tostring(err))
+        MidiMod.DebugLog("ERROR initializing network: " .. tostring(err))
     end
 end
 
@@ -168,7 +169,7 @@ end
 local xmlVol = readVolumeFromXML()
 if xmlVol then
     MidiMod.CurrentVolume = math.max(0.0, math.min(1.0, xmlVol))
-    MidiMod.Log("Volume loaded from settings: " .. MidiMod.CurrentVolume)
+    MidiMod.DebugLog("Volume loaded from settings: " .. MidiMod.CurrentVolume)
 end
 
 -- Poll volume changes periodically (client only, every ~1 second)
@@ -192,4 +193,4 @@ if CLIENT then
     end)
 end
 
-MidiMod.Log("=== Initialization complete ===")
+MidiMod.DebugLog("=== Initialization complete ===")

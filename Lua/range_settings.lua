@@ -42,7 +42,7 @@ function RangeSettings.create(options)
             return tonumber(File.Read(configPath))
         end)
         if ok and validRange(value) then return value end
-        MidiMod.Log("Could not read the range for " .. command .. "; using " .. DEFAULT_RANGE .. ".")
+        MidiMod.DebugLog("Could not read the range for " .. command .. "; using " .. DEFAULT_RANGE .. ".")
         return DEFAULT_RANGE
     end
 
@@ -51,7 +51,7 @@ function RangeSettings.create(options)
             File.CreateDirectory(Game.SaveFolder .. "/ModConfigs")
             File.Write(configPath, tostring(value) .. "\n")
         end)
-        if not ok then MidiMod.Log("Could not save the range for " .. command .. ": " .. tostring(err)) end
+        if not ok then MidiMod.DebugLog("Could not save the range for " .. command .. ": " .. tostring(err)) end
         return ok
     end
 

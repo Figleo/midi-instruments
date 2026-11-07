@@ -42,6 +42,7 @@ namespace MidiInstruments.Compatibility
         private static MethodInfo patchedMethod;
 
         public static string Status { get; private set; } = "Not initialized";
+        public static bool DebugEnabled { get; set; }
         internal static string ModDirectory { get; private set; }
 
         // The directory supplied by Lua identifies the enabled mod copy in LocalMods or Workshop.
@@ -169,6 +170,7 @@ namespace MidiInstruments.Compatibility
             patchedMethod = null;
             soundRoot = null;
             ModDirectory = null;
+            DebugEnabled = false;
             Status = "Unloaded";
         }
     }
@@ -220,9 +222,9 @@ namespace MidiInstruments.Compatibility
             try { ApplyToSource(source, midi, ReadFactor, WriteFactor); }
             catch (Exception error)
             {
-                if (reportedError) return;
+                if (reportedError || !SpwDistancePitch.DebugEnabled) return;
                 reportedError = true;
-                DebugConsole.ThrowError("[MidiMod] Doppler exclusion: " + error.GetBaseException().Message);
+                DebugConsole.ThrowError("[MidiMod:Debug] Doppler exclusion: " + error.GetBaseException().Message);
             }
         }
 
@@ -281,7 +283,11 @@ namespace MidiInstruments.Compatibility
             {
                 // The audio context may already be closed during a full game reload.
                 try { if (Al.IsSource(source)) WriteFactor(source, factor); }
-                catch (Exception error) { DebugConsole.ThrowError("[MidiMod] Restoring doppler: " + error.Message); }
+                catch (Exception error)
+                {
+                    if (SpwDistancePitch.DebugEnabled)
+                        DebugConsole.ThrowError("[MidiMod:Debug] Restoring doppler: " + error.Message);
+                }
             });
             Patcher.UnpatchSelf();
             installed = false;
@@ -426,7 +432,8 @@ namespace MidiInstruments.Compatibility
                     catch (Exception error)
                     {
                         result = "midispw.failed";
-                        DebugConsole.ThrowError("[MidiMod] SPW preferences: " + error.GetBaseException().Message);
+                        if (SpwDistancePitch.DebugEnabled)
+                            DebugConsole.ThrowError("[MidiMod:Debug] SPW preferences: " + error.GetBaseException().Message);
                     }
                     var messageBox = new GUIMessageBox(TextManager.Get("midispw.title"), TextManager.Get(result));
                     messageBox.Buttons[0].Text = TextManager.Get("midispw.close");

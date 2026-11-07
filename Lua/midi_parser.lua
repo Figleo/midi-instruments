@@ -69,13 +69,13 @@ local function parseHeader(data, pos)
 
     local ticksPerQuarter = division
     if division >= 32768 then
-        MidiMod.Log("Warning: SMPTE-based timing detected, defaulting to 480 ticks/quarter")
+        MidiMod.DebugLog("Warning: SMPTE-based timing detected, defaulting to 480 ticks/quarter")
         ticksPerQuarter = 480
     elseif division == 0 then
         -- Every timeMs would be a division by zero, i.e. NaN. Nothing crashes,
         -- but the whole score becomes uncomparable: getDurationMs returns NaN
         -- and seek's binary search collapses to the first event.
-        MidiMod.Log("Warning: zero ticks/quarter in header, defaulting to 480")
+        MidiMod.DebugLog("Warning: zero ticks/quarter in header, defaulting to 480")
         ticksPerQuarter = 480
     end
 
@@ -442,7 +442,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
     -- cacheGet drops the entry itself if the file on disk changed.
     local cached = cacheGet(filePath)
     if cached then
-        MidiMod.Log("Async cache hit: " .. filePath)
+        MidiMod.DebugLog("Async cache hit: " .. filePath)
         if onDone then pcall(onDone, cached.score) end
         return
     end
@@ -495,7 +495,7 @@ function MidiParser.parseAsync(filePath, onDone, onError)
 
         local yieldScore = makeYielder(200)
         local score = buildScore(allEvents, header.ticksPerQuarter, yieldScore)
-        MidiMod.Log("Async parsed " .. #score .. " notes from " .. filePath)
+        MidiMod.DebugLog("Async parsed " .. #score .. " notes from " .. filePath)
 
         -- #data is the file size; cacheGet compares it against the size on
         -- disk to detect a replaced file.
@@ -645,14 +645,14 @@ function MidiParser.listMidiFiles()
     end)
 
     if #files > 0 then
-        MidiMod.Log("[MidiParser] Found " .. #files .. " MIDI files")
+        MidiMod.DebugLog("[MidiParser] Found " .. #files .. " MIDI files")
     else
-        MidiMod.Log("[MidiParser] No .mid files found.")
-        MidiMod.Log("Install 'MIDI Storage' from Workshop (ID " .. MIDI_STORAGE_WORKSHOP_ID .. ").")
+        MidiMod.DebugLog("[MidiParser] No .mid files found.")
+        MidiMod.DebugLog("Install 'MIDI Storage' from Workshop (ID " .. MIDI_STORAGE_WORKSHOP_ID .. ").")
         if storageMidiPath then
-            MidiMod.Log("Drop your files under: " .. storageMidiPath)
+            MidiMod.DebugLog("Drop your files under: " .. storageMidiPath)
         else
-            MidiMod.Log("Then place .mid files in that mod's Midi folder.")
+            MidiMod.DebugLog("Then place .mid files in that mod's Midi folder.")
         end
     end
 

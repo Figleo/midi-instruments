@@ -383,7 +383,7 @@ function Network.playStreamedNotes(charID, notesStr, instrId)
     -- Logged rather than silent, because the flush drops pending note-offs and
     -- whatever is sounding right then will ring out.
     if _noteBufLen > NOTE_BUF_MAX then
-        MidiMod.Log("Jitter buffer overflow (" .. _noteBufLen .. " entries) - flushing")
+        MidiMod.DebugLog("Jitter buffer overflow (" .. _noteBufLen .. " entries) - flushing")
         Network.clearBuffer()
     end
 end
@@ -572,12 +572,12 @@ function Network.requestPlay(fileName, tempoMult)
 
     local character = Character.Controlled
     if not character or not MidiMod.IsHoldingInstrument(character) then
-        MidiMod.Log("Not holding instrument!")
+        MidiMod.DebugLog("Not holding instrument!")
         return
     end
 
     if not MidiMod.Player then
-        MidiMod.Log("Player module not loaded!")
+        MidiMod.DebugLog("Player module not loaded!")
         return
     end
 
@@ -585,13 +585,13 @@ function Network.requestPlay(fileName, tempoMult)
     Network.requestStop()
 
     local fullPath = fileName
-    MidiMod.Log("Loading MIDI: " .. fullPath)
+    MidiMod.DebugLog("Loading MIDI: " .. fullPath)
 
     MidiMod.MidiParser.parseAsync(
         fullPath,
         function(score)
             if not MidiMod.Player.loadScore(score, fullPath) then
-                MidiMod.Log("Failed to load MIDI: " .. fullPath)
+                MidiMod.DebugLog("Failed to load MIDI: " .. fullPath)
                 return
             end
             MidiMod.Player.setTempo(tempoMult)
@@ -603,10 +603,10 @@ function Network.requestPlay(fileName, tempoMult)
             if not Game.IsSingleplayer and MidiMod.BuffsEnabled then
                 Network.notifyBuffStart(character)
             end
-            MidiMod.Log("Started streaming MIDI!")
+            MidiMod.DebugLog("Started streaming MIDI!")
         end,
         function(err)
-            MidiMod.Log("Failed to parse MIDI: " .. tostring(err))
+            MidiMod.DebugLog("Failed to parse MIDI: " .. tostring(err))
         end
     )
 end
@@ -620,24 +620,24 @@ function Network.requestJoin(leaderCharID)
 
     local character = Character.Controlled
     if not character or not MidiMod.IsHoldingInstrument(character) then
-        MidiMod.Log("Not holding instrument!")
+        MidiMod.DebugLog("Not holding instrument!")
         return false, "noinstrument"
     end
 
     if not MidiMod.Player then
-        MidiMod.Log("Player module not loaded!")
+        MidiMod.DebugLog("Player module not loaded!")
         return false, "nomodule"
     end
 
     local entry = MidiMod.Player.activePerformers[leaderCharID]
     if not entry then
-        MidiMod.Log("Performer is no longer playing")
+        MidiMod.DebugLog("Performer is no longer playing")
         return false, "gone"
     end
 
     -- Either character may have moved since the performer list was built.
     if not MidiMod.CanJamWith(character, leaderCharID) then
-        MidiMod.Log("The performer is outside the Play Together radius (" .. MidiMod.JamRange .. ").")
+        MidiMod.DebugLog("The performer is outside the Play Together radius (" .. MidiMod.JamRange .. ").")
         return false, "outofrange"
     end
 
@@ -645,7 +645,7 @@ function Network.requestJoin(leaderCharID)
     Network.requestStop()
 
     MidiMod.Player.jamLeaderID = leaderCharID
-    MidiMod.Log("Mirroring char " .. tostring(leaderCharID) .. " (" .. tostring(entry.fileName) .. ")")
+    MidiMod.DebugLog("Mirroring char " .. tostring(leaderCharID) .. " (" .. tostring(entry.fileName) .. ")")
 
     -- Announce immediately so other clients start duplicating the leader's
     -- stream onto us without waiting for the periodic announce. mode carries
@@ -706,4 +706,4 @@ function Network.requestStop(charID)
     end
 end
 
-MidiMod.Log("[Network] Loaded. Jitter buffer=" .. JITTER_MS .. "ms, per-player stop.")
+MidiMod.DebugLog("[Network] Loaded. Jitter buffer=" .. JITTER_MS .. "ms, per-player stop.")

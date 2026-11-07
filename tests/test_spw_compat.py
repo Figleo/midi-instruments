@@ -10,8 +10,14 @@ BOOTSTRAP = """
 CLIENT = true
 now, attempts, unavailable = 0, 0, false
 os.clock = function() return now end
-logs, hooks = {}, {}
-MidiMod = { BasePath = '/mods/our-midi/', Log = function(text) logs[#logs + 1] = text end }
+logs, debugLogs, hooks = {}, {}, {}
+MidiMod = {
+    BasePath = '/mods/our-midi/', Debug = false,
+    Log = function(text) logs[#logs + 1] = text end,
+    DebugLog = function(text)
+        if MidiMod.Debug then debugLogs[#debugLogs + 1] = text end
+    end,
+}
 Hook = {
     Add = function(_, name, callback) hooks[name] = callback end,
     Remove = function(_, name) hooks[name] = nil end
@@ -31,11 +37,12 @@ LuaUserData = {
 """
 
 
-def environment(*, status="Applied", unavailable=False, client=True):
+def environment(*, status="Applied", unavailable=False, client=True, debug=False):
     lua = LuaRuntime()
     lua.execute(BOOTSTRAP)
     globals_ = lua.globals()
     globals_.CLIENT = client
+    globals_.MidiMod.Debug = debug
     globals_.unavailable = unavailable
     globals_.compat.Status = status
     lua.execute((ROOT / "Lua/spw_compat.lua").read_text(encoding="utf-8"))
@@ -46,6 +53,7 @@ def test_success_configures_exact_mod_path_and_stops_retrying():
     _, g = environment()
     assert g.configuredPath == "/mods/our-midi/"
     assert g.registeredName == "MidiInstruments.Compatibility.SpwDistancePitch"
+    assert g.MidiMod.SpwCompatibility.DebugEnabled is False
     assert len(g.logs) == 1
     assert g.logs[1] == "[SPW compatibility] Applied"
     assert g.hooks["MidiMod.SpwCompatibility.Load"] is None
@@ -67,7 +75,8 @@ def test_late_assembly_load_is_retried():
     callback()
     assert g.attempts == 1
     assert g.hooks["MidiMod.SpwCompatibility.Load"] is None
-    assert g.logs[2] == "[SPW compatibility] Applied"
+    assert len(g.logs) == 1
+    assert len(g.debugLogs) == 0
 
 
 def test_spw_loaded_later_gets_patch_without_repeated_logs():
@@ -79,8 +88,19 @@ def test_spw_loaded_later_gets_patch_without_repeated_logs():
     g.compat.Status = "Applied"
     g.now = 4
     callback()
-    assert len(g.logs) == 2
+    assert len(g.logs) == 1
+    assert len(g.debugLogs) == 0
     assert g.hooks["MidiMod.SpwCompatibility.Load"] is None
+
+
+def test_debug_enabled_before_late_assembly_load_reaches_csharp():
+    _, g = environment(unavailable=True, debug=True)
+    g.unavailable = False
+    g.now = 2
+    g.hooks["MidiMod.SpwCompatibility.Load"]()
+    assert g.compat.DebugEnabled is True
+    assert len(g.logs) == 1
+    assert g.debugLogs[1] == "[SPW compatibility] Applied"
 
 
 def test_incompatible_version_reports_once_and_stops():

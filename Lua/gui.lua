@@ -51,7 +51,7 @@ local pathBox = nil
 local function openMidiFolder()
     local dir = MidiMod.MidiParser and MidiMod.MidiParser.getStorageMidiPath()
     if not dir then
-        MidiMod.Log("[GUI] No MIDI folder resolved (MIDI Storage not installed?)")
+        MidiMod.DebugLog("[GUI] No MIDI folder resolved (MIDI Storage not installed?)")
         return
     end
 
@@ -71,8 +71,8 @@ local function openMidiFolder()
     end)
     if ok then return end
 
-    MidiMod.Log("[GUI] Could not open folder: " .. tostring(err))
-    MidiMod.Log("[GUI] Path shown in the panel (console rewrites the user name)")
+    MidiMod.DebugLog("[GUI] Could not open folder: " .. tostring(err))
+    MidiMod.DebugLog("[GUI] Path shown in the panel (console rewrites the user name)")
     if pathBox then
         pcall(function()
             pathBox.Text    = dir
@@ -918,4 +918,4 @@ Hook.Add("think", "MidiMod.GUI.Think", function()
     end
 end)
 
-MidiMod.Log("[GUI] Initialized. Panel auto-shows on instrument pickup. Toggle: F5")
+MidiMod.DebugLog("[GUI] Initialized. Panel auto-shows on instrument pickup. Toggle: F5")

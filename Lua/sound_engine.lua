@@ -111,7 +111,7 @@ function SoundEngine.init()
         end
     end
 
-    MidiMod.Log(string_format("[SoundEngine] Chunked load started: %d jobs across %d instruments.",
+    MidiMod.DebugLog(string_format("[SoundEngine] Chunked load started: %d jobs across %d instruments.",
         #_loadQueue, #instruments))
 end
 
@@ -163,7 +163,7 @@ local function pumpLoadQueue()
         _loadDone = true
         _loadQueue = nil -- allow GC
         SoundEngine.initialized = true
-        MidiMod.Log(string.format(
+        MidiMod.DebugLog(string.format(
             "[SoundEngine] Load complete: %d samples (%d objects).",
             _loadSamplesLoaded, _loadObjectsLoaded))
     end
@@ -612,4 +612,4 @@ function SoundEngine.stopAllForChar(charID)
     SoundEngine.activeNoteUIDs[charID] = nil
 end
 
-MidiMod.Log("[SoundEngine] Loaded.")
+MidiMod.DebugLog("[SoundEngine] Loaded.")

@@ -12,7 +12,10 @@ HARNESS = """
 logs, commands, remoteCommands, hooks, receivers, sent, files = {}, {}, {}, {}, {}, {}, {}
 writeCount, now = 0, 0
 os.clock = function() return now end
-MidiMod = { Log = function(text) logs[#logs + 1] = text end }
+MidiMod = {
+    Log = function(text) logs[#logs + 1] = text end,
+    DebugLog = function() end,
+}
 File = {
     Exists = function(path) return files[path] ~= nil end,
     Read = function(path) return files[path] end,

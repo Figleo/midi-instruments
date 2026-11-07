@@ -53,5 +53,5 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midispw.uploaded>Local lists were saved. Settings containing notes were sent to the server through SPW and will apply after synchronization.</midispw.uploaded>
   <midispw.serveroverride>notes is in both local lists, but the server's SPW settings currently control audio. The host or a player with Manage Settings permission must press this button to add notes to the server lists.</midispw.serveroverride>
   <midispw.unavailable>Soundproof Walls is not loaded. Enable SPW and C# mod support in LuaCs, then reload mods.</midispw.unavailable>
-  <midispw.failed>Could not finish applying SPW settings. See the console for error details and check the SPW lists before trying again.</midispw.failed>
+  <midispw.failed>Could not finish applying SPW settings. Run mididebug on in the console, retry to see error details, and check the SPW lists.</midispw.failed>
 </infotexts>

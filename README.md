@@ -97,7 +97,8 @@ mods after installing the update. No compatibility assembly runs on the server.
 
 Successful client startup logs `[MidiMod] [SPW compatibility] Applied`. If a
 future SPW version changes the relevant method, the patch reports
-`Incompatible SPW` and leaves SPW's original calculation in place. Without SPW,
+`Incompatible SPW` and leaves SPW's original calculation in place. Later status
+changes and error details are logged only when debug is enabled. Without SPW,
 ordinary MIDI playback is unaffected. Disabling/reloading the mod removes only
 its own Harmony patch.
 
@@ -109,16 +110,25 @@ or writing to its files. The build uses local game/Harmony references and no
 NuGet packages. Python startup/network checks run with `python -m pytest tests`;
 they require `pytest` and `lupa`.
 
+## Debug Logging
+
+Use `mididebug on` in the console to enable debug messages, or `mididebug off`
+to disable them. `mididebug` shows the current state. The setting applies only
+to the local client or server and resets to off when the mod reloads. Console
+messages are always in English. With debug off, automatic output is limited
+to the version, base path, both range settings and the initial SPW status.
+Commands still print their replies.
+
 ## Adding Custom MIDI Files
 
-MIDI files are loaded from the **MIDI Storage** workshop item or your local mod directory depending on debug settings.
+MIDI files are loaded from the **MIDI Storage** workshop item or your local mod directory.
 
 ### Option 1: Via Workshop (Default / Normal Mode)
 Install the [MIDI Storage Mod](https://steamcommunity.com/workshop/filedetails/?id=3695216167) and place `.mid` / `.midi` files into its directory:
 - **Windows**: `C:\Users\<User>\AppData\Local\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\3695216167\`
 - **Linux**: `~/.local/share/Daedalic Entertainment GmbH/Barotrauma/WorkshopMods/Installed/3695216167/Midi/`
 
-### Option 2: Local Mod Folder (Debug Mode)
+### Option 2: Local Mod Folder
 Files will be read automatically from `<ModDirectory>/Midi/`
 
 ## Controls & Usage

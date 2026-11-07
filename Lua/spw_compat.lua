@@ -10,6 +10,8 @@ local function install()
         LuaUserData.RegisterType(typeName)
         local compat = LuaUserData.CreateStatic(typeName, true)
         compat.ConfigureModDirectory(MidiMod.BasePath)
+        compat.DebugEnabled = MidiMod.Debug == true
+        MidiMod.SpwCompatibility = compat
         compat.TryInstallPatch()
         return compat.Status
     end)
@@ -17,7 +19,11 @@ local function install()
         status = "Compatibility assembly is unavailable: " .. tostring(status)
     end
     if status ~= reported then
-        MidiMod.Log("[SPW compatibility] " .. status)
+        if reported == nil then
+            MidiMod.Log("[SPW compatibility] " .. status)
+        else
+            MidiMod.DebugLog("[SPW compatibility] " .. status)
+        end
         reported = status
     end
     return ok and (status == "Applied" or status:find("Incompatible SPW", 1, true) ~= nil)

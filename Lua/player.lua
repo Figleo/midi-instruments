@@ -60,13 +60,13 @@ end
 function Player.loadScore(score, filePath)
     Player.stop()
     if not score or #score == 0 then
-        MidiMod.Log("MIDI has no notes: " .. tostring(filePath))
+        MidiMod.DebugLog("MIDI has no notes: " .. tostring(filePath))
         return false
     end
     Player.score = score
     Player.cursor = 1
     Player.currentFile = filePath
-    MidiMod.Log("Loaded MIDI: " .. #score .. " notes from " .. tostring(filePath))
+    MidiMod.DebugLog("Loaded MIDI: " .. #score .. " notes from " .. tostring(filePath))
     return true
 end
 
@@ -83,7 +83,7 @@ end
 
 function Player.play(character)
     if not Player.score or #Player.score == 0 then
-        MidiMod.Log("No MIDI loaded to play")
+        MidiMod.DebugLog("No MIDI loaded to play")
         return
     end
 
@@ -94,7 +94,7 @@ function Player.play(character)
     Player.cursor = 1
     Player.startTime = getTimeMs()
     Player.playing = true
-    MidiMod.Log("Playback started (" .. #Player.score .. " notes)")
+    MidiMod.DebugLog("Playback started (" .. #Player.score .. " notes)")
 end
 
 function Player.stop()
@@ -129,7 +129,7 @@ function Player.stop()
     end
 
     if wasPlaying then
-        MidiMod.Log("Playback stopped")
+        MidiMod.DebugLog("Playback stopped")
     end
 end
 
@@ -155,7 +155,7 @@ function Player.stopChar(charID)
     -- NET_STOP, so they cut our sounds and drop us from their mirror maps.
     if Player.jamLeaderID and Player.jamLeaderID == charID then
         Player.jamLeaderID = nil
-        MidiMod.Log("Jam leader stopped - stopping")
+        MidiMod.DebugLog("Jam leader stopped - stopping")
         if MidiMod.Network then
             pcall(MidiMod.Network.requestStop)
         end
@@ -515,7 +515,7 @@ local function onThink(currentInst, currentItem)
 
     -- Song finished
     if cursor > scoreLen then
-        MidiMod.Log("Playback complete")
+        MidiMod.DebugLog("Playback complete")
         local wasStreaming = Player.isStreamingHost
         Player.playing = false
 
@@ -580,7 +580,7 @@ local function mirrorThink()
     local currentInst = MidiMod.GetHeldInstrument(ch)
 
     if isDead or isUnconscious or not currentInst then
-        MidiMod.Log("Mirror interrupted - stopping")
+        MidiMod.DebugLog("Mirror interrupted - stopping")
         Player.jamLeaderID = nil
         if MidiMod.Network then
             pcall(MidiMod.Network.requestStop)
@@ -595,7 +595,7 @@ local function mirrorThink()
     local leaderID    = Player.jamLeaderID
     local leaderEntry = Player.activePerformers[leaderID]
     if not leaderEntry or (os_clock() - leaderEntry.receivedAt) > LEADER_LOST_SEC then
-        MidiMod.Log("Jam leader is gone - stopping")
+        MidiMod.DebugLog("Jam leader is gone - stopping")
         -- Clear the link BEFORE requesting our own stop, same as the cascade
         -- in stopChar: our stop echoes back through stopChar and must not loop.
         Player.jamLeaderID = nil
@@ -609,7 +609,7 @@ local function mirrorThink()
     end
 
     if not MidiMod.CanJamWith(ch, leaderID) then
-        MidiMod.Log("Play Together stopped: the leader is outside the radius of " .. MidiMod.JamRange .. ".")
+        MidiMod.DebugLog("Play Together stopped: the leader is outside the radius of " .. MidiMod.JamRange .. ".")
         Player.jamLeaderID = nil
         if MidiMod.Network then
             MidiMod.Network.requestStop(charID)
@@ -654,7 +654,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     pcall(function() isDead = ch.IsDead end)
     pcall(function() isUnconscious = ch.IsUnconscious end)
     if isDead or isUnconscious then
-        MidiMod.Log("Character incapacitated - stopping playback")
+        MidiMod.DebugLog("Character incapacitated - stopping playback")
         if MidiMod.Network then
             pcall(MidiMod.Network.requestStop)
         else
@@ -671,7 +671,7 @@ Hook.Add("think", "MidiMod.Player.Think", function()
     if not currentInst then
         if not Player.instrumentDropped then
             Player.instrumentDropped = true
-            MidiMod.Log("Instrument dropped - stopping playback")
+            MidiMod.DebugLog("Instrument dropped - stopping playback")
             if MidiMod.Network then
                 pcall(MidiMod.Network.requestStop)
             else
@@ -752,4 +752,4 @@ if SERVER then
     end)
 end
 
-MidiMod.Log("[Player] Loaded. RMB hold + server buffs enabled.")
+MidiMod.DebugLog("[Player] Loaded. RMB hold + server buffs enabled.")
