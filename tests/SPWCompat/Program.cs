@@ -27,6 +27,7 @@ internal static partial class Program
             return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
         };
         RunPreferenceChecks();
+        RunDopplerChecks();
         RunBehaviorChecks();
         if (args.Length > 1) RunInstalledSpwChecks(Path.GetFullPath(args[1]));
         Console.WriteLine("SPW compatibility: " + checks + " checks passed.");

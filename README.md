@@ -33,16 +33,24 @@ The server (or singleplayer) saves the value to
 does not overwrite your saved setting. Playback still uses `Sound.Play` for
 Soundproof Walls compatibility; SPW's `RangeMult` does not multiply this radius.
 
-## Soundproof Walls: preserve MIDI pitch at a distance
+## Soundproof Walls: preserve MIDI pitch at a distance and in motion
 
 This mod includes a client-only compatibility patch for Soundproof Walls. You
-can leave **Pitch With Distance** enabled in SPW: it still affects other
-sounds, but is skipped for this mod's nine MIDI sample banks. The distance patch refines one
+can leave **Pitch With Distance** and **Doppler Effect** enabled in SPW: they
+still affect other sounds, but are skipped for this mod's nine MIDI sample
+banks. The distance patch refines one
 boolean check in SPW's original `ChannelInfo.UpdatePitch` method; it does not
 replace the pitch formula or edit SPW's DLL. MIDI transposition,
 other SPW pitch effects, muffling and reverb retain their existing behavior.
 Your `ReverbForcedSounds` and `XMLIgnoredSounds` entries can stay as configured.
 Do not add MIDI samples to `PitchIgnoredSounds`, which forces pitch to `1.0`.
+
+Doppler is disabled through OpenAL Soft's **per-source** `AL_DOPPLER_FACTOR`,
+before a MIDI channel starts playback. This excludes both emitter movement and
+listener movement without changing musical pitch, spatial positioning or
+SPW's global doppler settings. The previous source factor is restored on
+disposal, reuse or mod unload so pooled sources retain normal behavior for
+other sounds. No extra SPW list entry or button press is needed for this patch.
 
 To configure muffling and reverb, open **Settings → Mod Gameplay Settings →
 MIDI Instruments** and press **SPW patch** below the MIDI volume control. This

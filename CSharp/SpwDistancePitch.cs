@@ -108,6 +108,7 @@ namespace MidiInstruments.Compatibility
             try
             {
                 Patcher.Patch(method, transpiler: new HarmonyMethod(typeof(SpwDistancePitch), nameof(Transpile)));
+                SpwDoppler.Install();
                 patchedMethod = method;
                 Status = "Applied";
                 return true;
@@ -163,11 +164,128 @@ namespace MidiInstruments.Compatibility
 
         public static void RemovePatch()
         {
+            SpwDoppler.Remove();
             Patcher.UnpatchSelf();
             patchedMethod = null;
             soundRoot = null;
             ModDirectory = null;
             Status = "Unloaded";
+        }
+    }
+
+    // OpenAL's per-source doppler factor excludes both source and listener motion.
+    // Pooled sources retain their previous factor when the channel is released or reused.
+    internal static class SpwDoppler
+    {
+        private static readonly Harmony Patcher = new Harmony("MidiInstruments.SpwDoppler");
+        private static readonly Dictionary<uint, float> OriginalFactors = new Dictionary<uint, float>();
+        private static readonly object Sync = new object();
+        private static bool installed;
+        private static bool reportedError;
+
+        internal static void Install()
+        {
+            if (installed) return;
+            try
+            {
+                Patcher.Patch(AccessTools.Method(typeof(SoundManager), "AssignFreeSourceToChannel", new[] { typeof(SoundChannel) }),
+                    postfix: new HarmonyMethod(typeof(SpwDoppler), nameof(SourceAssigned)));
+                Patcher.Patch(AccessTools.Method(typeof(SoundChannel), "Dispose", Type.EmptyTypes),
+                    prefix: new HarmonyMethod(typeof(SpwDoppler), nameof(SourceDisposing)));
+                installed = true;
+            }
+            catch { Patcher.UnpatchSelf(); throw; }
+        }
+
+        private static void SourceAssigned(SoundManager __instance, SoundChannel newChannel, int __result)
+        {
+            if (__result < 0 || newChannel.Sound == null) return;
+            uint source = __instance.GetSourceFromIndex(newChannel.Sound.SourcePoolIndex, __result);
+            ConfigureSource(source, SpwDistancePitch.IsMidiSample(newChannel.Sound.Filename));
+        }
+
+        private static void SourceDisposing(SoundChannel __instance)
+        {
+            if (__instance.mutex == null) return;
+            lock (__instance.mutex)
+            {
+                if (__instance.ALSourceIndex < 0 || __instance.Sound == null) return;
+                uint source = __instance.Sound.Owner.GetSourceFromIndex(__instance.Sound.SourcePoolIndex, __instance.ALSourceIndex);
+                ConfigureSource(source, false);
+            }
+        }
+
+        private static void ConfigureSource(uint source, bool midi)
+        {
+            try { ApplyToSource(source, midi, ReadFactor, WriteFactor); }
+            catch (Exception error)
+            {
+                if (reportedError) return;
+                reportedError = true;
+                DebugConsole.ThrowError("[MidiMod] Doppler exclusion: " + error.GetBaseException().Message);
+            }
+        }
+
+        private static float ReadFactor(uint source)
+        {
+            Al.GetError();
+            Al.GetSourcef(source, Al.EnumDopplerFactor, out float factor);
+            int error = Al.GetError();
+            if (error != 0) throw new InvalidOperationException("Reading source doppler: " + Al.GetErrorString(error));
+            return factor;
+        }
+
+        private static void WriteFactor(uint source, float factor)
+        {
+            Al.GetError();
+            Al.Sourcef(source, Al.EnumDopplerFactor, factor);
+            int error = Al.GetError();
+            if (error != 0) throw new InvalidOperationException("Setting source doppler: " + Al.GetErrorString(error));
+        }
+
+        internal static void ApplyToSource(uint source, bool midi, Func<uint, float> read, Action<uint, float> write)
+        {
+            if (source == 0) return;
+            lock (Sync)
+            {
+                if (midi)
+                {
+                    if (OriginalFactors.ContainsKey(source)) return;
+                    float original = read(source);
+                    write(source, 0f);
+                    OriginalFactors.Add(source, original);
+                }
+                else if (OriginalFactors.TryGetValue(source, out float original))
+                {
+                    write(source, original);
+                    OriginalFactors.Remove(source);
+                }
+            }
+        }
+
+        internal static void RestoreSources(Action<uint, float> write)
+        {
+            lock (Sync)
+            {
+                foreach (var entry in OriginalFactors.ToArray())
+                {
+                    write(entry.Key, entry.Value);
+                    OriginalFactors.Remove(entry.Key);
+                }
+            }
+        }
+
+        internal static void Remove()
+        {
+            RestoreSources((source, factor) =>
+            {
+                // The audio context may already be closed during a full game reload.
+                try { if (Al.IsSource(source)) WriteFactor(source, factor); }
+                catch (Exception error) { DebugConsole.ThrowError("[MidiMod] Restoring doppler: " + error.Message); }
+            });
+            Patcher.UnpatchSelf();
+            installed = false;
+            reportedError = false;
         }
     }
 
