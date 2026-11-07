@@ -121,6 +121,7 @@ end
 
 safeRequire("midi_parser")
 safeRequire("range_config")
+safeRequire("spw_compat")
 safeRequire("sound_engine")
 safeRequire("player")
 safeRequire("network")

@@ -1,2 +1,4 @@
 Midi/
+tests/SPWCompat/bin/
+tests/SPWCompat/obj/
 tests/__pycache__/

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModConfig>
+  <Assembly File="%ModDir%/CSharp/SpwDistancePitch.cs" IsScript="true" FriendlyName="MidiInstruments.SpwCompat" Target="Client" />
   <Lua File="%ModDir%/Lua/Autorun/init.lua" IsAutorun="true" />
   <Config File="%ModDir%/Config/SettingsClient.xml" Target="Client" />
 </ModConfig>

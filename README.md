@@ -33,6 +33,37 @@ The server (or singleplayer) saves the value to
 does not overwrite your saved setting. Playback still uses `Sound.Play` for
 Soundproof Walls compatibility; SPW's `RangeMult` does not multiply this radius.
 
+## Soundproof Walls: preserve MIDI pitch at a distance
+
+This mod includes a client-only compatibility patch for Soundproof Walls. You
+can leave **Pitch With Distance** enabled in SPW: it still affects other
+sounds, but is skipped for this mod's nine MIDI sample banks. The distance patch refines one
+boolean check in SPW's original `ChannelInfo.UpdatePitch` method; it does not
+replace the pitch formula or edit SPW's DLL. MIDI transposition,
+other SPW pitch effects, muffling and reverb retain their existing behavior.
+Your `ReverbForcedSounds` and `XMLIgnoredSounds` entries can stay as configured.
+Do not add MIDI samples to `PitchIgnoredSounds`, which forces pitch to `1.0`.
+
+Every player, including the host's client, needs the updated MIDI mod and LuaCs
+with C# mods enabled (also required for SPW itself). LuaCs compiles
+`CSharp/SpwDistancePitch.cs` automatically through `ModConfig.xml`; players do not
+need the .NET SDK, a separate patch mod or a replacement SPW DLL. Restart/reload
+mods after installing the update. No compatibility assembly runs on the server.
+
+Successful client startup logs `[MidiMod] [SPW compatibility] Applied`. If a
+future SPW version changes the relevant method, the patch reports
+`Incompatible SPW` and leaves SPW's original calculation in place. Without SPW,
+ordinary MIDI playback is unaffected. Disabling/reloading the mod removes only
+its own Harmony patch.
+
+Developer validation lives in `tests/SPWCompat`. With .NET SDK 8 installed, run
+`dotnet build --configuration Release --configfile NuGet.Config` from that folder,
+then run `dotnet bin/Release/net8.0/SPWCompat.Tests.dll <Barotrauma directory> <SPW client DLL>`.
+The second argument verifies the installed SPW method without playing game audio
+or writing to its files. The build uses local game/Harmony references and no
+NuGet packages. Python startup/network checks run with `python -m pytest tests`;
+they require `pytest` and `lupa`.
+
 ## Adding Custom MIDI Files
 
 MIDI files are loaded from the **MIDI Storage** workshop item or your local mod directory depending on debug settings.
