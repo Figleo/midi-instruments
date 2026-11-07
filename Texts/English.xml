@@ -27,4 +27,11 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midiplayer.modeacoustic>Acoustic</midiplayer.modeacoustic>
   <midiplayer.modeacousticsoft>Fingers Soft</midiplayer.modeacousticsoft>
   <midiplayer.guitaracousticmode>Guitar Mode</midiplayer.guitaracousticmode>
+  <midirange.help>midirange [100..50000] - show instrument sound range or set it as the host. Default: 1000.</midirange.help>
+  <midirange.current>Instrument sound range: [range].</midirange.current>
+  <midirange.changed>Instrument sound range set to [range] and saved. Applies to new notes.</midirange.changed>
+  <midirange.invalid>Usage: midirange [100..50000]. Enter one whole number.</midirange.invalid>
+  <midirange.hostonly>Only the host can change instrument sound range. On a dedicated server, use the server console.</midirange.hostonly>
+  <midirange.waiting>Requesting instrument sound range from the server...</midirange.waiting>
+  <midirange.savefailed>Instrument sound range set to [range], but could not be saved. It will reset after restarting.</midirange.savefailed>
 </infotexts>

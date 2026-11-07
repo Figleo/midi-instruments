@@ -27,4 +27,11 @@
   <midiplayer.modeacoustic>Акустика</midiplayer.modeacoustic>
   <midiplayer.modeacousticsoft>Мягкий перебор (soft)</midiplayer.modeacousticsoft>
   <midiplayer.guitaracousticmode>Режим гитары</midiplayer.guitaracousticmode>
+  <midirange.help>midirange [100..50000] — показать дальность инструментов или изменить её от имени хоста. По умолчанию: 1000.</midirange.help>
+  <midirange.current>Дальность звука инструментов: [range].</midirange.current>
+  <midirange.changed>Дальность звука инструментов установлена на [range] и сохранена. Применяется к новым нотам.</midirange.changed>
+  <midirange.invalid>Использование: midirange [100..50000]. Введите одно целое число.</midirange.invalid>
+  <midirange.hostonly>Дальность звука инструментов может менять только хост. На выделенном сервере используйте консоль сервера.</midirange.hostonly>
+  <midirange.waiting>Запрашиваю дальность звука инструментов у сервера...</midirange.waiting>
+  <midirange.savefailed>Дальность звука инструментов установлена на [range], но сохранить её не удалось. После перезапуска значение сбросится.</midirange.savefailed>
 </infotexts>

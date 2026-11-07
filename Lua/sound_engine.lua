@@ -387,6 +387,9 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     local velGain = math_min(1.0, (velocity / 127))
     local baseGain = velGain * volumeMult
 
+    -- The radius is captured per note; changes apply to subsequent notes.
+    local soundRange = MidiMod.SoundRange or SOUND_RANGE
+
     local channel = nil
 
     -- Pass freqMult directly into Play so the pitch is set at channel creation.
@@ -394,7 +397,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     -- gets overwritten every tick when "Update Non-Looping Sounds" is enabled.
     if worldPos then
         local ok, ch = pcall(function()
-            return sound.Play(baseGain, SOUND_RANGE, freqMult, Vector2(worldPos.X, worldPos.Y))
+            return sound.Play(baseGain, soundRange, freqMult, Vector2(worldPos.X, worldPos.Y))
         end)
         if ok and ch then channel = ch end
     end
@@ -413,7 +416,7 @@ local function doPlayNote(midiNote, velocity, worldPos, instrument, charID)
     if worldPos then
         pcall(function()
             channel.Near     = SOUND_NEAR
-            channel.Far      = SOUND_RANGE
+            channel.Far      = soundRange
             channel.Position = Vector3(worldPos.X, worldPos.Y, 0)
         end)
 

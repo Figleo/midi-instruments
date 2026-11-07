@@ -120,6 +120,7 @@ local function safeRequire(modName)
 end
 
 safeRequire("midi_parser")
+safeRequire("range_config")
 safeRequire("sound_engine")
 safeRequire("player")
 safeRequire("network")
