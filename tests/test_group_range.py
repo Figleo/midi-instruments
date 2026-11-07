@@ -130,5 +130,6 @@ def test_localized_group_command_and_buttons_have_matching_keys():
     assert {entry.tag.lower() for entry in english} == {entry.tag.lower() for entry in russian}
     for key in ("help", "current", "changed", "invalid", "hostonly", "waiting", "savefailed", "left", "outofrange"):
         assert russian.find("midijamrange." + key) is not None
+    assert russian.find("midispw.close").text == "Закрыть"
     assert russian.find("midiplayer.jamtitle").text == "Играть вместе:"
     assert english.find("midiplayer.jamtitle").text == "Play Together:"

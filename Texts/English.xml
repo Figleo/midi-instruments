@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <infotexts language="English" nowhitespace="false" translatedname="English">
-  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>MIDI Volume</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>
+  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.MidiVolume.DisplayName>MIDI Volume</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.MidiVolume.DisplayName>
   <entityname.guitarelectric>Electric guitar</entityname.guitarelectric>
   <entitydescription.guitarelectric>Just electric guitar</entitydescription.guitarelectric>
   <midiplayer.title>MIDI Player</midiplayer.title>
@@ -34,16 +34,6 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midirange.hostonly>Only the host can change instrument sound range. On a dedicated server, use the server console.</midirange.hostonly>
   <midirange.waiting>Requesting instrument sound range from the server...</midirange.waiting>
   <midirange.savefailed>Instrument sound range set to [range], but could not be saved. It will reset after restarting.</midirange.savefailed>
-  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>Soundproof Walls compatibility</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>
-  <midispw.button>SPW patch</midispw.button>
-  <midispw.title>Soundproof Walls — MIDI</midispw.title>
-  <midispw.tooltip>Add notes to XML Ignored Sounds and Reverb Forced Sounds and save SPW settings. Existing entries are preserved; duplicates are skipped.</midispw.tooltip>
-  <midispw.changed>Added notes to XML Ignored Sounds and Reverb Forced Sounds. SPW settings were saved and applied. You can edit these lists in SPW later.</midispw.changed>
-  <midispw.unchanged>notes is already in both lists. No duplicates were added.</midispw.unchanged>
-  <midispw.uploaded>Local lists were saved. Settings containing notes were sent to the server through SPW and will apply after synchronization.</midispw.uploaded>
-  <midispw.serveroverride>notes is in both local lists, but the server's SPW settings currently control audio. The host or a player with Manage Settings permission must press this button to add notes to the server lists.</midispw.serveroverride>
-  <midispw.unavailable>Soundproof Walls is not loaded. Enable SPW and C# mod support in LuaCs, then reload mods.</midispw.unavailable>
-  <midispw.failed>Could not finish applying SPW settings. See the console for error details and check the SPW lists before trying again.</midispw.failed>
   <midijamrange.help>midijamrange [100..50000] - show the Play Together radius or set it as the host. Default: 2000.</midijamrange.help>
   <midijamrange.current>Play Together radius: [range].</midijamrange.current>
   <midijamrange.changed>Play Together radius set to [range] and saved. Applies immediately.</midijamrange.changed>
@@ -53,4 +43,15 @@ Install 'MIDI Storage' from Workshop</midiplayer.nofiles>
   <midijamrange.savefailed>Play Together radius set to [range], but could not be saved. It will reset after restarting.</midijamrange.savefailed>
   <midijamrange.outofrange>The performer is outside the Play Together radius ([range]).</midijamrange.outofrange>
   <midijamrange.left>Play Together stopped: the leader is outside the radius of [range].</midijamrange.left>
+  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>Soundproof Walls compatibility</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>
+  <midispw.button>SPW patch</midispw.button>
+  <midispw.close>Close</midispw.close>
+  <midispw.title>Soundproof Walls — MIDI</midispw.title>
+  <midispw.tooltip>Add notes to XML Ignored Sounds and Reverb Forced Sounds and save SPW settings. Existing entries are preserved; duplicates are skipped.</midispw.tooltip>
+  <midispw.changed>Added notes to XML Ignored Sounds and Reverb Forced Sounds. SPW settings were saved and applied. You can edit these lists in SPW later.</midispw.changed>
+  <midispw.unchanged>notes is already in both lists. No duplicates were added.</midispw.unchanged>
+  <midispw.uploaded>Local lists were saved. Settings containing notes were sent to the server through SPW and will apply after synchronization.</midispw.uploaded>
+  <midispw.serveroverride>notes is in both local lists, but the server's SPW settings currently control audio. The host or a player with Manage Settings permission must press this button to add notes to the server lists.</midispw.serveroverride>
+  <midispw.unavailable>Soundproof Walls is not loaded. Enable SPW and C# mod support in LuaCs, then reload mods.</midispw.unavailable>
+  <midispw.failed>Could not finish applying SPW settings. See the console for error details and check the SPW lists before trying again.</midispw.failed>
 </infotexts>

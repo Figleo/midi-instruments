@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <infotexts language="Russian" nowhitespace="false" translatedname="Русский">
-  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>MIDI громкость</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.Midivolume.DisplayName>
+  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.MidiVolume.DisplayName>Громкость MIDI</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.MidiVolume.DisplayName>
   <entityname.guitarelectric>Электрогитара</entityname.guitarelectric>
   <entitydescription.guitarelectric>Просто электрогитара</entitydescription.guitarelectric>
-  <midiplayer.title>MIDI Плеер</midiplayer.title>
+  <midiplayer.title>MIDI-плеер</midiplayer.title>
   <midiplayer.nofiles>MIDI-файлы не найдены!
 Установите 'MIDI Storage' из Мастерской</midiplayer.nofiles>
   <midiplayer.search>Поиск:</midiplayer.search>
@@ -15,17 +15,17 @@
   <midiplayer.ready>Готово  |  F5 переключить</midiplayer.ready>
   <midiplayer.loading>Загрузка...  |  F5 скрыть</midiplayer.loading>
   <midiplayer.playing>Играет...  |  F5 скрыть</midiplayer.playing>
-  <midiplayer.volumehint>* Громкость: Esc -&gt; Настройки -&gt; Mod Gameplay Settings *</midiplayer.volumehint>
+  <midiplayer.volumehint>* Громкость: Esc -&gt; Настройки -&gt; Настройки модов *</midiplayer.volumehint>
   <midiplayer.jamtitle>Играть вместе:</midiplayer.jamtitle>
   <midiplayer.jamming>Играем вместе...  |  Стоп чтобы выйти</midiplayer.jamming>
   <midiplayer.guitarmode>Режим гитары</midiplayer.guitarmode>
   <midiplayer.modeclassic>Классика</midiplayer.modeclassic>
-  <midiplayer.modelead>Соло (lead)</midiplayer.modelead>
-  <midiplayer.modecrunch>Кранч (crunch)</midiplayer.modecrunch>
+  <midiplayer.modelead>Соло</midiplayer.modelead>
+  <midiplayer.modecrunch>Кранч</midiplayer.modecrunch>
   <midiplayer.modebass>Бас</midiplayer.modebass>
-  <midiplayer.modesteel>Сталь (steel)</midiplayer.modesteel>
+  <midiplayer.modesteel>Стальные струны</midiplayer.modesteel>
   <midiplayer.modeacoustic>Акустика</midiplayer.modeacoustic>
-  <midiplayer.modeacousticsoft>Мягкий перебор (soft)</midiplayer.modeacousticsoft>
+  <midiplayer.modeacousticsoft>Мягкий перебор</midiplayer.modeacousticsoft>
   <midiplayer.guitaracousticmode>Режим гитары</midiplayer.guitaracousticmode>
   <midirange.help>midirange [100..50000] — показать дальность инструментов или изменить её от имени хоста. По умолчанию: 1000.</midirange.help>
   <midirange.current>Дальность звука инструментов: [range].</midirange.current>
@@ -34,16 +34,6 @@
   <midirange.hostonly>Дальность звука инструментов может менять только хост. На выделенном сервере используйте консоль сервера.</midirange.hostonly>
   <midirange.waiting>Запрашиваю дальность звука инструментов у сервера...</midirange.waiting>
   <midirange.savefailed>Дальность звука инструментов установлена на [range], но сохранить её не удалось. После перезапуска значение сбросится.</midirange.savefailed>
-  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>Совместимость с Soundproof Walls</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>
-  <midispw.button>SPW патч</midispw.button>
-  <midispw.title>Soundproof Walls — MIDI</midispw.title>
-  <midispw.tooltip>Добавить notes в исключения XML-звуков и список принудительной реверберации. Сохранить настройки SPW. Существующие записи сохраняются, дубликаты не добавляются.</midispw.tooltip>
-  <midispw.changed>notes добавлено в исключения XML-звуков и список принудительной реверберации. Настройки SPW сохранены и применены. Позже вы можете изменить эти списки в SPW.</midispw.changed>
-  <midispw.unchanged>notes уже есть в обоих списках. Дубликаты не добавлены.</midispw.unchanged>
-  <midispw.uploaded>Локальные списки сохранены. Настройки с notes отправлены серверу через SPW; они применятся после синхронизации.</midispw.uploaded>
-  <midispw.serveroverride>notes есть в обоих локальных списках, но сейчас звук обрабатывается по настройкам SPW сервера. Хост или игрок с правом управления настройками должен нажать эту кнопку, чтобы добавить notes в серверные списки.</midispw.serveroverride>
-  <midispw.unavailable>Soundproof Walls не загружен. Включите SPW и поддержку C# модов в LuaCs, затем перезагрузите моды.</midispw.unavailable>
-  <midispw.failed>Не удалось завершить применение настроек SPW. Подробности ошибки — в консоли. Проверьте списки SPW перед повторным нажатием.</midispw.failed>
   <midijamrange.help>midijamrange [100..50000] — показать радиус совместной игры или изменить его от имени хоста. По умолчанию: 2000.</midijamrange.help>
   <midijamrange.current>Радиус совместной игры: [range].</midijamrange.current>
   <midijamrange.changed>Радиус совместной игры установлен на [range] и сохранён. Применяется сразу.</midijamrange.changed>
@@ -53,4 +43,15 @@
   <midijamrange.savefailed>Радиус совместной игры установлен на [range], но сохранить его не удалось. После перезапуска значение сбросится.</midijamrange.savefailed>
   <midijamrange.outofrange>Исполнитель находится дальше радиуса совместной игры ([range]).</midijamrange.outofrange>
   <midijamrange.left>Совместная игра остановлена: ведущий вышел за радиус [range].</midijamrange.left>
+  <MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>Совместимость с Soundproof Walls</MIDI_x0020_Instruments_x0020__x005B_WIP_x005D_.SpwPatch.DisplayName>
+  <midispw.button>SPW патч</midispw.button>
+  <midispw.close>Закрыть</midispw.close>
+  <midispw.title>Soundproof Walls — MIDI</midispw.title>
+  <midispw.tooltip>Добавить notes в исключения XML-звуков и список принудительной реверберации. Сохранить настройки SPW. Существующие записи сохраняются, дубликаты не добавляются.</midispw.tooltip>
+  <midispw.changed>notes добавлено в исключения XML-звуков и список принудительной реверберации. Настройки SPW сохранены и применены. Позже вы можете изменить эти списки в SPW.</midispw.changed>
+  <midispw.unchanged>notes уже есть в обоих списках. Дубликаты не добавлены.</midispw.unchanged>
+  <midispw.uploaded>Локальные списки сохранены. Настройки с notes отправлены серверу через SPW; они применятся после синхронизации.</midispw.uploaded>
+  <midispw.serveroverride>notes есть в обоих локальных списках, но сейчас звук обрабатывается по настройкам SPW сервера. Хост или игрок с правом управления настройками должен нажать эту кнопку, чтобы добавить notes в серверные списки.</midispw.serveroverride>
+  <midispw.unavailable>Soundproof Walls не загружен. Включите SPW и поддержку C# модов в LuaCs, затем перезагрузите моды.</midispw.unavailable>
+  <midispw.failed>Не удалось завершить применение настроек SPW. Подробности ошибки — в консоли. Проверьте списки SPW перед повторным нажатием.</midispw.failed>
 </infotexts>

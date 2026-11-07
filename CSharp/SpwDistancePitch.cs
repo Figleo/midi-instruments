@@ -429,6 +429,7 @@ namespace MidiInstruments.Compatibility
                         DebugConsole.ThrowError("[MidiMod] SPW preferences: " + error.GetBaseException().Message);
                     }
                     var messageBox = new GUIMessageBox(TextManager.Get("midispw.title"), TextManager.Get(result));
+                    messageBox.Buttons[0].Text = TextManager.Get("midispw.close");
                     return true;
                 }
             };
